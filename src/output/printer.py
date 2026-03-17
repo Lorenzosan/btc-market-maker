@@ -2,29 +2,28 @@ import asyncio
 import json
 import logging
 
+from src.orderbook.manager import OrderBookManager
+
 logger = logging.getLogger(__name__)
 
 
-def format_event(event):
-    return {
-        "source": event.source,
-        "symbol": event.symbol,
-        "channel": event.channel,
-        "event_type": event.event_type,
-        "num_bid_updates": len(event.bid_updates),
-        "num_ask_updates": len(event.ask_updates),
-    }
+async def print_books(queue: asyncio.Queue):
+    manager = OrderBookManager()
 
-
-async def print_events(queue: asyncio.Queue):
     while True:
         event = await queue.get()
 
-        logger.info(json.dumps(format_event(event)))
+        # Apply each normalized market event to the corresponding local book.
+        manager.apply_event(event)
 
-        logger.debug(json.dumps({
-            "bids": event.bid_updates,
-            "asks": event.ask_updates
-        }))
+        top = manager.top_of_book(event.source)
+
+        logger.info(json.dumps({
+            "source": event.source,
+            "symbol": event.symbol,
+            "exchange_ts": event.exchange_ts,
+            "best_bid": top["best_bid"],
+            "best_ask": top["best_ask"],
+        }, separators=(",", ":")))
 
         queue.task_done()

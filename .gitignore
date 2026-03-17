@@ -8,7 +8,6 @@ btc-venv/
 venv/
 
 # logs
-logs/
 *.log
 
 # mac

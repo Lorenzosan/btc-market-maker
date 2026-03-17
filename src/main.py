@@ -1,8 +1,9 @@
 import asyncio
+import logging
 
 from src.ingestion.binance import BinanceConnector
 from src.ingestion.coinbase import CoinbaseConnector
-from src.output.printer import print_events
+from src.output.printer import print_books
 from src.utils.logging import setup_logging
 
 
@@ -17,9 +18,12 @@ async def main():
     await asyncio.gather(
         binance.run(queue),
         coinbase.run(queue),
-        print_events(queue),
+        print_books(queue),
     )
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logging.getLogger(__name__).info("shutdown requested by user")

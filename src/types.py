@@ -1,15 +1,11 @@
 from dataclasses import dataclass
 from typing import Literal, Optional
 
-PriceLevel = tuple[float, float]
+PriceLevel = tuple[float, float]  # (price, size)
 
-#
-# This class represents one normalized market event
-#
-# For update events, bid_updates and ask_updates are
-# changed price levels, not the full state of the
-# order book.
-#
+# Normalized representation of a single market data message.
+# For update events, bid_updates and ask_updates contain only
+# changed price levels (deltas), not the full order book state.
 @dataclass
 class MarketDataEvent:
     source: Literal["binance", "coinbase"]
@@ -19,6 +15,8 @@ class MarketDataEvent:
     exchange_ts: Optional[str]
     received_ts: str
     sequence: Optional[int]
-    bid_updates: list[PriceLevel]
-    ask_updates: list[PriceLevel]
-    raw: dict
+    sequence_start: Optional[int] = None
+    sequence_end: Optional[int] = None
+    bid_updates: list[PriceLevel] = None
+    ask_updates: list[PriceLevel] = None
+    raw: Optional[dict] = None

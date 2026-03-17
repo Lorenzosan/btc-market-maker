@@ -4,3 +4,4 @@ COINBASE_WS_URL = "wss://ws-feed.exchange.coinbase.com"
 
 BINANCE_SYMBOL = "BTCUSDT"
 COINBASE_SYMBOL = "BTC-USD"
+
