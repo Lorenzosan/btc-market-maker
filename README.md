@@ -1,7 +1,4 @@
-This is the README
-
-1. Install websockets
-
+TBD
 
 main.py
   -> starts connectors
