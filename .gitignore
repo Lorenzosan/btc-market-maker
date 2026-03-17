@@ -1,0 +1,21 @@
+# python
+__pycache__/
+*.pyc
+*.pyo
+
+# virtual env
+btc-venv/
+venv/
+
+# logs
+logs/
+*.log
+
+# mac
+.DS_Store
+
+# editor
+*.swp
+
+# backup files
+*~
