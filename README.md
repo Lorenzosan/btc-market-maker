@@ -1,4 +1,4 @@
-# BTC Market Maker Take Home
+# BTC Market Maker
 
 This service ingests live BTC spot market data from Binance and Coinbase, maintains a local order book per venue, computes a consolidated fair value, and emits quote recommendations for a simple market making strategy.
 
