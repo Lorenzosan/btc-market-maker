@@ -2,43 +2,131 @@ import asyncio
 import json
 import logging
 
+from src.config import OUTPUT_INTERVAL_SECONDS, OUTPUT_VERBOSITY
 from src.orderbook.manager import OrderBookManager
+from src.quoting.fair_value import FairValueEngine
+from src.quoting.quote_engine import QuoteEngine
+from src.utils.time import utc_now_iso
 
 logger = logging.getLogger(__name__)
+
+
+def format_top(top: dict) -> str:
+    # Compact one-venue rendering for terminal output.
+    best_bid = top["best_bid"]
+    best_ask = top["best_ask"]
+
+    if best_bid is None or best_ask is None:
+        return "NA"
+
+    bid = best_bid[0]
+    ask = best_ask[0]
+    return f"{bid:.2f}/{ask:.2f}"
+
+
+def format_quote_side(price: float | None, size: float | None) -> str:
+    # Compact rendering for one quote side.
+    if price is None or size is None:
+        return "NA"
+    return f"{price:.2f} x {size:.4f}"
+
+
+def build_event_payload(event, top: dict, fv, quote, verbosity: int) -> dict:
+    # Common payload shared by verbose output modes.
+    payload = {
+        "source": event.source,
+        "symbol": event.symbol,
+        "exchange_ts": event.exchange_ts,
+        "best_bid": top["best_bid"],
+        "best_ask": top["best_ask"],
+        "mid": top["mid"],
+        "spread": top["spread"],
+        "initialized": top["initialized"],
+        "valid": top["valid"],
+        "last_sequence": top["last_sequence"],
+        "status": top["status"],
+        "fair_value": fv.fair_value,
+        "fair_value_status": fv.status,
+        "reservation_price": quote.reservation_price,
+        "quote_bid_price": quote.bid_price,
+        "quote_bid_size": quote.bid_size,
+        "quote_ask_price": quote.ask_price,
+        "quote_ask_size": quote.ask_size,
+        "quote_inventory": quote.inventory,
+        "quote_status": quote.status,
+    }
+
+    if verbosity >= 2:
+        payload["fair_value_inputs"] = [
+            {
+                "source": q.source,
+                "mid": round(q.mid, 2),
+                "spread": round(q.spread, 2),
+                "weight": round(q.weight, 4),
+            }
+            for q in fv.inputs
+        ]
+
+    return payload
 
 
 async def print_books(queue: asyncio.Queue):
     # Single manager instance that tracks one local book per source.
     manager = OrderBookManager()
 
-    while True:
-        # Consume one normalized event at a time from the shared queue.
-        event = await queue.get()
+    # Fair-value engine built on top of maintained venue books.
+    fair_value_engine = FairValueEngine(max_spread=1.0)
 
-        # Update the corresponding local book.
-        manager.apply_event(event)
+    # Quote engine built on top of fair value.
+    quote_engine = QuoteEngine()
 
-        # Extract the current top-of-book state for that source.
-        top = manager.top_of_book(event.source)
+    async def consumer() -> None:
+        # Consume and apply events as fast as they arrive.
+        while True:
+            event = await queue.get()
+            manager.apply_event(event)
 
-        # Emit a compact JSON log line to make debugging and later processing easier.
-        logger.info(
-            json.dumps(
-                {
-                    "source": event.source,
-                    "symbol": event.symbol,
-                    "exchange_ts": event.exchange_ts,
-                    "best_bid": top["best_bid"],
-                    "best_ask": top["best_ask"],
-                    "mid": top["mid"],
-                    "spread": top["spread"],
-                    "initialized": top["initialized"],
-                    "valid": top["valid"],
-                    "last_sequence": top["last_sequence"],
-                    "status": top["status"],
-                },
-                separators=(",", ":"),
+            if OUTPUT_VERBOSITY >= 1:
+                top = manager.top_of_book(event.source)
+                fv = fair_value_engine.compute(manager)
+                quote = quote_engine.compute(fv)
+                payload = build_event_payload(event, top, fv, quote, OUTPUT_VERBOSITY)
+                logger.info(json.dumps(payload, separators=(",", ":")))
+
+            queue.task_done()
+
+    async def reporter() -> None:
+        # Emit one compact consolidated snapshot periodically in level-0 mode.
+        # Only one timestamp is printed here: the local reporting time.
+        if OUTPUT_VERBOSITY != 0:
+            return
+
+        while True:
+            await asyncio.sleep(OUTPUT_INTERVAL_SECONDS)
+
+            binance_top = manager.top_of_book("binance")
+            coinbase_top = manager.top_of_book("coinbase")
+            fv = fair_value_engine.compute(manager)
+            quote = quote_engine.compute(fv)
+
+            binance_str = format_top(binance_top)
+            coinbase_str = format_top(coinbase_top)
+            fv_str = "NA" if fv.fair_value is None else f"{fv.fair_value:.2f}"
+            bid_str = format_quote_side(quote.bid_price, quote.bid_size)
+            ask_str = format_quote_side(quote.ask_price, quote.ask_size)
+
+            logger.info(
+                "%s | BIN %s | CB %s | FV %s | BID %s | ASK %s | QSTATUS %s",
+                utc_now_iso(),
+                binance_str,
+                coinbase_str,
+                fv_str,
+                bid_str,
+                ask_str,
+                quote.status,
             )
-        )
 
-        queue.task_done()
+    await asyncio.gather(
+        consumer(),
+        reporter(),
+    )
