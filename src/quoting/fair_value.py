@@ -93,6 +93,8 @@ class FairValueEngine:
                 status="invalid_weights",
             )
 
+        # Note: BTC-USD and BTCUSDT are treated as near-equivalent here.
+        # USDT/USD basis is ignored for simplicity in this take-home version.
         fair_value = sum(q.mid * q.weight for q in quotes) / total_weight
 
         return FairValueResult(
