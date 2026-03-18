@@ -1,0 +1,2 @@
+websockets>=12,<16
+pytest>=8,<9

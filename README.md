@@ -1,8 +1,21 @@
-TBD
+# BTC Market Maker Take Home
 
-main.py
-  -> starts connectors
-  -> connectors read websocket messages
-  -> connectors normalize exchange-specific payloads
-  -> normalized events go into one asyncio queue
-  -> printer consumes the queue and logs summaries
+This service ingests live BTC spot market data from Binance and Coinbase, maintains a local order book per venue, computes a consolidated fair value, and emits quote recommendations for a simple market making strategy.
+
+The implementation prioritizes correctness, clarity, and robustness over complexity.
+
+---
+
+## Requirements
+
+- Python 3.11+
+- Internet access
+
+---
+
+## Setup
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
