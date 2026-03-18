@@ -17,7 +17,7 @@ class OrderBook:
 
     def apply_update(self, bid_updates: list[PriceLevel], ask_updates: list[PriceLevel]) -> None:
         # Updates are price-level deltas:
-        # size == 0 means remove the level, otherwise insert/update it.
+        # size == 0 means remove the level, otherwise insert or update it.
         for price, size in bid_updates:
             if size == 0:
                 self.bids.pop(price, None)
@@ -30,6 +30,16 @@ class OrderBook:
             else:
                 self.asks[price] = size
 
+    def truncate(self, depth: int) -> None:
+        # Kraken book updates require local truncation back to the subscribed depth.
+        if len(self.bids) > depth:
+            sorted_bid_prices = sorted(self.bids.keys(), reverse=True)[:depth]
+            self.bids = {price: self.bids[price] for price in sorted_bid_prices}
+
+        if len(self.asks) > depth:
+            sorted_ask_prices = sorted(self.asks.keys())[:depth]
+            self.asks = {price: self.asks[price] for price in sorted_ask_prices}
+
     def best_bid(self) -> PriceLevel | None:
         if not self.bids:
             return None
@@ -41,3 +51,13 @@ class OrderBook:
             return None
         price = min(self.asks)
         return price, self.asks[price]
+
+    def is_crossed(self) -> bool:
+        # A crossed book is invalid because best bid should not exceed best ask.
+        best_bid = self.best_bid()
+        best_ask = self.best_ask()
+
+        if best_bid is None or best_ask is None:
+            return False
+
+        return best_bid[0] >= best_ask[0]
