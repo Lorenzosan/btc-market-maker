@@ -90,12 +90,14 @@ The system is composed of four main components.
 
 Key parameters are defined in `src/config.py`:
 
-- `OUTPUT_INTERVAL_SECONDS` default `0.25`
+- `OUTPUT_INTERVAL_SECONDS`
 - `HALF_SPREAD`
 - `BASE_SIZE`
 - `INVENTORY_SKEW`
 - `MAX_INVENTORY`
 - `MAX_FAIR_VALUE_SPREAD`
+
+
 
 ---
 
@@ -183,7 +185,3 @@ A longer sample live run is provided in:
 `docs/sample_output.txt`
 
 ---
-
-## Remarks
-
-This implementation is intentionally simple but structured. It is designed to be easy to reason about, test, and extend while satisfying the core requirements of the assignment.
