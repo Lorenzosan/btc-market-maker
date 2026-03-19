@@ -2,8 +2,6 @@
 
 This service ingests live BTC spot market data from Binance and Coinbase, maintains a local order book per venue, computes a consolidated fair value, and emits quote recommendations for a simple market making strategy.
 
-The implementation prioritizes correctness, clarity, and robustness over complexity.
-
 ---
 
 ## Requirements
@@ -38,7 +36,7 @@ The service connects to:
 
 ## Output
 
-Every 250 ms the service prints a consolidated snapshot including:
+At a fixed interval (configured via OUTPUT_INTERVAL_SECONDS) the service prints a consolidated snapshot including:
 
 - timestamp
 - Binance best bid and ask
@@ -102,6 +100,7 @@ Key parameters are defined in `src/config.py`:
 ---
 
 ## Tests
+The test suite requires pytest and pytest-asyncio (included in requirements.txt).
 
 Run tests with:
 
@@ -131,7 +130,7 @@ The test suite covers:
 
 ## Failure Handling
 
-- Binance sequence gaps trigger a resync through snapshot reload
+- - Binance sequence gaps trigger a resync via snapshot reload without reconnecting the websocket
 - Updates received before snapshot are ignored
 - Crossed or invalid books are excluded from fair value
 - If no valid venues are available, quoting is disabled
@@ -142,22 +141,15 @@ The test suite covers:
 
 ```text
 src/
-  ingestion/
-    base.py
-    binance.py
-    coinbase.py
-  orderbook/
-    book.py
-    manager.py
-  fair_value/
-    fair_value.py
-  quoting/
-    quote_engine.py
-  output/
-    printer.py
-  utils/
-    time.py
+  ingestion/          exchange connectors (Binance, Coinbase)
+  orderbook/          local order book and manager
+  fair_value/         fair value computation
+  quoting/            quote logic
+  output/             printer loop
+  utils/              time and logging helpers
   config.py
+  types.py
+  main.py
 
 tests/
   test_binance_connector.py
@@ -167,7 +159,7 @@ tests/
   test_quote_engine.py
 
 docs/
-  design_note.md
+  DESIGN.md
   sample_output.txt
 ```
 
