@@ -93,7 +93,7 @@ Key parameters are defined in `src/config.py`:
 - `BASE_SIZE`
 - `INVENTORY_SKEW`
 - `MAX_INVENTORY`
-- `MAX_FAIR_VALUE_SPREAD`
+- `FAIR_VALUE_MAX_SPREAD`
 
 
 
@@ -130,7 +130,7 @@ The test suite covers:
 
 ## Failure Handling
 
-- - Binance sequence gaps trigger a resync via snapshot reload without reconnecting the websocket
+- Binance sequence gaps trigger a resync via snapshot reload without reconnecting the websocket
 - Updates received before snapshot are ignored
 - Crossed or invalid books are excluded from fair value
 - If no valid venues are available, quoting is disabled
