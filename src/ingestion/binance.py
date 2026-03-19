@@ -53,38 +53,16 @@ class BinanceConnector(BaseConnector):
                         while not buffered_events:
                             await asyncio.sleep(0.01)
 
-                        snapshot = await asyncio.to_thread(self.fetch_snapshot_event)
+                        # Retry snapshot initialization a few times before giving up on the socket.
+                        snapshot, last_update_id = await self.initialize_from_snapshot(
+                            buffered_events
+                        )
+
                         await queue.put(snapshot)
 
-                        last_update_id = snapshot.sequence
-                        if last_update_id is None:
-                            raise RuntimeError("binance snapshot missing last_update_id")
-
-                        # Drop buffered events that are strictly older than the snapshot.
-                        while buffered_events and int(buffered_events[0]["u"]) < last_update_id:
-                            buffered_events.popleft()
-
-                        if not buffered_events:
-                            raise RuntimeError(
-                                "binance snapshot bridge failed: no buffered events remain"
-                            )
-
-                        first_event = buffered_events[0]
-                        first_u = int(first_event["u"])
-                        first_U = int(first_event["U"])
-
-                        # First surviving event must bridge the snapshot.
-                        if not (first_U <= last_update_id <= first_u):
-                            raise RuntimeError(
-                                "binance snapshot bridge failed: first buffered event "
-                                "does not cover snapshot id"
-                            )
-
-                        # Replay buffered updates in order.
+                        # Replay all buffered events that are newer than the snapshot.
                         while buffered_events:
                             msg = buffered_events.popleft()
-
-                            event = self.parse_update_message(msg)
                             event_u = int(msg["u"])
                             event_U = int(msg["U"])
 
@@ -92,14 +70,14 @@ class BinanceConnector(BaseConnector):
                             if event_u <= last_update_id:
                                 continue
 
-                            # Detect sequence gaps.
+                            # Detect sequence gaps before applying the update.
                             if event_U > last_update_id + 1:
                                 raise RuntimeError(
                                     f"binance buffered sequence gap: expected at most "
                                     f"{last_update_id + 1}, got {event_U}"
                                 )
 
-                            await queue.put(event)
+                            await queue.put(self.parse_update_message(msg))
                             last_update_id = event_u
 
                         # Continue with live events from the same buffer.
@@ -108,21 +86,21 @@ class BinanceConnector(BaseConnector):
                                 await asyncio.sleep(0.001)
 
                             msg = buffered_events.popleft()
-                            event = self.parse_update_message(msg)
-
                             event_u = int(msg["u"])
                             event_U = int(msg["U"])
 
+                            # Ignore duplicate or stale messages.
                             if event_u <= last_update_id:
                                 continue
 
+                            # Detect sequence gaps before applying the update.
                             if event_U > last_update_id + 1:
                                 raise RuntimeError(
                                     f"binance live sequence gap: expected at most "
                                     f"{last_update_id + 1}, got {event_U}"
                                 )
 
-                            await queue.put(event)
+                            await queue.put(self.parse_update_message(msg))
                             last_update_id = event_u
 
                     finally:
@@ -136,6 +114,73 @@ class BinanceConnector(BaseConnector):
             except Exception as exc:
                 logger.warning("binance reconnecting after error: %s", exc)
                 await asyncio.sleep(2)
+
+    async def initialize_from_snapshot(
+        self,
+        buffered_events: deque[dict],
+        max_attempts: int = 5,
+    ) -> tuple[MarketDataEvent, int]:
+        # Retry the REST snapshot a few times while the websocket keeps buffering.
+        # This avoids unnecessary full reconnects when one snapshot cannot be bridged.
+        last_error: Exception | None = None
+
+        for attempt in range(1, max_attempts + 1):
+            snapshot = await asyncio.to_thread(self.fetch_snapshot_event)
+            last_update_id = snapshot.sequence
+
+            if last_update_id is None:
+                raise RuntimeError("binance snapshot missing last_update_id")
+
+            try:
+                self.drop_stale_buffered_events(buffered_events, last_update_id)
+                self.validate_snapshot_bridge(buffered_events, last_update_id)
+                return snapshot, last_update_id
+            except RuntimeError as exc:
+                last_error = exc
+                logger.warning(
+                    "binance snapshot bridge attempt %s/%s failed: %s",
+                    attempt,
+                    max_attempts,
+                    exc,
+                )
+
+                # Give the reader a moment to accumulate fresher diff events.
+                await asyncio.sleep(0.1)
+
+        raise RuntimeError(
+            f"binance failed to initialize local book after {max_attempts} "
+            f"snapshot attempts: {last_error}"
+        )
+
+    def drop_stale_buffered_events(
+        self,
+        buffered_events: deque[dict],
+        last_update_id: int,
+    ) -> None:
+        # Remove buffered events that are already fully covered by the snapshot.
+        while buffered_events and int(buffered_events[0]["u"]) <= last_update_id:
+            buffered_events.popleft()
+
+    def validate_snapshot_bridge(
+        self,
+        buffered_events: deque[dict],
+        last_update_id: int,
+    ) -> None:
+        # Binance requires the first retained diff event to cover the next update id
+        # after the snapshot, not the snapshot id itself.
+        if not buffered_events:
+            raise RuntimeError("no buffered events remain")
+
+        first_event = buffered_events[0]
+        first_u = int(first_event["u"])
+        first_U = int(first_event["U"])
+        next_update_id = last_update_id + 1
+
+        if not (first_U <= next_update_id <= first_u):
+            raise RuntimeError(
+                f"first buffered event does not bridge next snapshot id: "
+                f"U={first_U} u={first_u} next={next_update_id}"
+            )
 
     def fetch_snapshot_event(self) -> MarketDataEvent:
         # Fetch the initial REST snapshot required by Binance's local-book procedure.

@@ -4,7 +4,7 @@ import logging
 
 from src.config import OUTPUT_INTERVAL_SECONDS, OUTPUT_VERBOSITY
 from src.orderbook.manager import OrderBookManager
-from src.quoting.fair_value import FairValueEngine
+from src.fair_value.fair_value import FairValueEngine
 from src.quoting.quote_engine import QuoteEngine
 from src.utils.time import utc_now_iso
 

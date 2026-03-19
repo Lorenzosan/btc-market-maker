@@ -1,5 +1,5 @@
 from src.orderbook.manager import OrderBookManager
-from src.quoting.fair_value import FairValueEngine
+from src.fair_value.fair_value import FairValueEngine
 from src.types import MarketDataEvent
 
 

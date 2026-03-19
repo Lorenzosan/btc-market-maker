@@ -8,7 +8,7 @@ from src.config import (
     QUOTE_HALF_SPREAD,
     QUOTE_INVENTORY_SKEW,
 )
-from src.quoting.fair_value import FairValueResult
+from src.fair_value.fair_value import FairValueResult
 
 
 @dataclass

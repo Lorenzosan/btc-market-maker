@@ -1,4 +1,4 @@
-from src.quoting.fair_value import FairValueResult
+from src.fair_value.fair_value import FairValueResult
 from src.quoting.quote_engine import QuoteEngine
 
 
