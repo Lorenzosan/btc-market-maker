@@ -49,7 +49,7 @@ def test_quotes_center_around_reservation_price():
     assert quote.ask_price == 102.0
     assert quote.bid_size == 0.01
     assert quote.ask_size == 0.01
-    assert quote.status == "active"
+    assert quote.status == "active_single_venue"
 
 
 def test_long_inventory_shifts_quotes_down():

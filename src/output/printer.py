@@ -119,15 +119,10 @@ async def print_books(queue: asyncio.Queue):
             bid_str = format_quote_side(quote.bid_price, quote.bid_size)
             ask_str = format_quote_side(quote.ask_price, quote.ask_size)
 
-            logger.info(
-                "ts=%s | bin=%s | cb=%s | fv=%s | bid=%s | ask=%s | status=%s",
-                utc_now_iso(),
-                binance_str,
-                coinbase_str,
-                fv_str,
-                bid_str,
-                ask_str,
-                quote.status,
+            print(
+                f"ts={utc_now_iso()} | bin={binance_str} | cb={coinbase_str} | "
+                f"fv={fv_str} | bid={bid_str} | ask={ask_str} | status={quote.status}",
+                flush=True,
             )
 
     await asyncio.gather(

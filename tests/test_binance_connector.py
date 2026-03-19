@@ -54,7 +54,7 @@ def test_validate_snapshot_bridge_rejects_non_covering_first_event():
     connector = BinanceConnector()
     buffered_events = deque(
         [
-            {"U": 102, "u": 105, "b": [], "a": [], "E": 2},
+            {"U": 106, "u": 110, "b": [], "a": [], "E": 2},
         ]
     )
 
@@ -88,12 +88,3 @@ async def test_initialize_from_snapshot_retries_until_bridge_is_possible(monkeyp
     assert last_update_id == 104
     assert buffered_events[0]["U"] == 105
     assert buffered_events[0]["u"] == 110
-
-
-    def test_live_sequence_gap_detection():
-        last_update_id = 100
-        msg = {"U": 103, "u": 105, "b": [], "a": [], "E": 1}
-        
-        with pytest.raises(RuntimeError, match="sequence gap"):
-            if int(msg["U"]) > last_update_id + 1:
-                raise RuntimeError("binance live sequence gap")

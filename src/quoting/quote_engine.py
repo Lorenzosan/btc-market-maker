@@ -67,7 +67,12 @@ class QuoteEngine:
 
         bid_size = self.base_size
         ask_size = self.base_size
-        status = "active"
+
+        # Distinguish whether fair value comes from one venue or multiple venues.
+        if len(fair_value.inputs) >= 2:
+            status = "active_two_sided"
+        else:
+            status = "active_single_venue"
 
         # If inventory is too long, stop buying and only quote the ask side.
         if self.inventory >= self.max_long_inventory:
