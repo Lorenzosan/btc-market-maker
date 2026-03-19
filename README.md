@@ -36,11 +36,11 @@ The service connects to:
 
 ## Output
 
-At a fixed interval (configured via OUTPUT_INTERVAL_SECONDS) the service prints a consolidated snapshot including:
+At a fixed interval, configured via `OUTPUT_INTERVAL_SECONDS`, the service prints a consolidated snapshot including:
 
-- timestamp
-- Binance best bid and ask
-- Coinbase best bid and ask
+- local reporting timestamp in UTC
+- Binance top of book (best bid and ask with top-level sizes)
+- Coinbase top of book (best bid and ask with top-level sizes)
 - consolidated fair value
 - recommended bid and ask with sizes
 - quote status
@@ -48,8 +48,7 @@ At a fixed interval (configured via OUTPUT_INTERVAL_SECONDS) the service prints 
 Example:
 
 ```text
-2026-03-18T14:00:00.000000+00:00 | BIN 84250.10/84250.20 | CB 84249.80/84250.30 | FV 84250.08 | BID 84248.08 x 0.0100 | ASK 84252.08 x 0.0100 | QSTATUS active
-```
+ts=2026-03-19T12:34:56.123456Z | bin=71330.70(0.4200)/71330.71(0.2500) | cb=71326.84(0.3800)/71326.85(0.1900) | fv=71328.78 | bid=71326.78 x 0.0100 | ask=71330.78 x 0.0100 | status=active
 
 ---
 

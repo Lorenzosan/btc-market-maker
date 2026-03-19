@@ -10,7 +10,6 @@ from src.utils.time import utc_now_iso
 
 logger = logging.getLogger(__name__)
 
-
 def format_top(top: dict) -> str:
     # Compact one-venue rendering for terminal output.
     best_bid = top["best_bid"]
@@ -19,10 +18,9 @@ def format_top(top: dict) -> str:
     if best_bid is None or best_ask is None:
         return "NA"
 
-    bid = best_bid[0]
-    ask = best_ask[0]
-    return f"{bid:.2f}/{ask:.2f}"
-
+    bid_px, bid_sz = best_bid
+    ask_px, ask_sz = best_ask
+    return f"{bid_px:.2f}({bid_sz:.4f})/{ask_px:.2f}({ask_sz:.4f})"
 
 def format_quote_side(price: float | None, size: float | None) -> str:
     # Compact rendering for one quote side.
@@ -97,7 +95,7 @@ async def print_books(queue: asyncio.Queue):
 
     async def reporter() -> None:
         # Emit one compact consolidated snapshot periodically in level-0 mode.
-        # Only one timestamp is printed here: the local reporting time.
+        # The timestamp is the local reporting time in UTC.
         if OUTPUT_VERBOSITY != 0:
             return
 
@@ -116,7 +114,7 @@ async def print_books(queue: asyncio.Queue):
             ask_str = format_quote_side(quote.ask_price, quote.ask_size)
 
             logger.info(
-                "%s | BIN %s | CB %s | FV %s | BID %s | ASK %s | QSTATUS %s",
+                "ts=%s | bin=%s | cb=%s | fv=%s | bid=%s | ask=%s | status=%s",
                 utc_now_iso(),
                 binance_str,
                 coinbase_str,
