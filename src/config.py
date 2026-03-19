@@ -39,3 +39,7 @@ MAX_SHORT_INVENTORY = -0.05
 
 # Initial simulated inventory.
 INITIAL_INVENTORY = 0.0
+
+# Maximum allowed spread (in price units) for a venue to be included in fair value
+# Venues with wider spreads are considered unreliable and excluded from the calculation
+FAIR_VALUE_MAX_SPREAD = 1.0

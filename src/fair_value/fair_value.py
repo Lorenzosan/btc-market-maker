@@ -51,6 +51,7 @@ class FairValueEngine:
         if spread <= 0:
             return None
 
+        # Exclude venues with excessive spread, as they likely indicate stale or unreliable data
         if spread > self.max_spread:
             return None
 

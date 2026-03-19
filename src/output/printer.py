@@ -72,8 +72,10 @@ async def print_books(queue: asyncio.Queue):
     # Single manager instance that tracks one local book per source.
     manager = OrderBookManager()
 
+
     # Fair-value engine built on top of maintained venue books.
-    fair_value_engine = FairValueEngine(max_spread=1.0)
+    # The spread filter threshold is configured centrally to avoid hard-coded parameters here.
+    fair_value_engine = FairValueEngine(max_spread=FAIR_VALUE_MAX_SPREAD)
 
     # Quote engine built on top of fair value.
     quote_engine = QuoteEngine()
