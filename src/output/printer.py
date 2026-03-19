@@ -2,7 +2,11 @@ import asyncio
 import json
 import logging
 
-from src.config import OUTPUT_INTERVAL_SECONDS, OUTPUT_VERBOSITY
+from src.config import (
+    FAIR_VALUE_MAX_SPREAD,
+    OUTPUT_INTERVAL_SECONDS,
+    OUTPUT_VERBOSITY,
+)
 from src.orderbook.manager import OrderBookManager
 from src.fair_value.fair_value import FairValueEngine
 from src.quoting.quote_engine import QuoteEngine
