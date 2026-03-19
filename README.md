@@ -16,8 +16,8 @@ The implementation prioritizes correctness, clarity, and robustness over complex
 ## Setup
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
+python -m venv btc-venv
+source btc-venv/bin/activate
 pip install -r requirements.txt
 ```
 
@@ -106,7 +106,7 @@ Key parameters are defined in `src/config.py`:
 Run tests with:
 
 ```bash
-pytest
+python -m pytest
 ```
 
 The test suite covers:
@@ -142,20 +142,33 @@ The test suite covers:
 
 ```text
 src/
-  data_ingestion/     exchange connectors
-  order_book/         local order book and manager
-  fair_value/         fair value computation
-  quoting/            quote logic
-  output/             printer loop
-  utils/              logging
+  ingestion/
+    base.py
+    binance.py
+    coinbase.py
+  orderbook/
+    book.py
+    manager.py
+  fair_value/
+    fair_value.py
+  quoting/
+    quote_engine.py
+  output/
+    printer.py
+  utils/
+    time.py
   config.py
 
-docs/
-  DESIGN.md
-  sample_output.txt
-
 tests/
-  pytest test suite
+  test_binance_connector.py
+  test_fair_value.py
+  test_manager.py
+  test_orderbook.py
+  test_quote_engine.py
+
+docs/
+  design_note.md
+  sample_output.txt
 ```
 
 ---
