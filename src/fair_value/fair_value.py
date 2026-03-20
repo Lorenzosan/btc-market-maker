@@ -9,6 +9,8 @@ class VenueQuote:
     source: str
     bid: float
     ask: float
+    bid_size: float
+    ask_size: float
     mid: float
     spread: float
     weight: float
@@ -37,19 +39,21 @@ class FairValueEngine:
 
         if not state.initialized:
             return None
+
         if not state.valid:
             return None
+
         if state.is_stale:
             return None
-        
+
         best_bid = state.book.best_bid()
         best_ask = state.book.best_ask()
 
         if best_bid is None or best_ask is None:
             return None
 
-        bid_price = best_bid[0]
-        ask_price = best_ask[0]
+        bid_price, bid_size = best_bid
+        ask_price, ask_size = best_ask
         spread = ask_price - bid_price
 
         if spread <= 0:
@@ -70,6 +74,8 @@ class FairValueEngine:
             source=source,
             bid=bid_price,
             ask=ask_price,
+            bid_size=bid_size,
+            ask_size=ask_size,
             mid=mid,
             spread=spread,
             weight=weight,

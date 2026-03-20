@@ -8,12 +8,13 @@ from src.config import (
     OUTPUT_VERBOSITY,
     VENUE_STALE_AFTER_SECONDS,
 )
-from src.orderbook.manager import OrderBookManager
 from src.fair_value.fair_value import FairValueEngine
+from src.orderbook.manager import OrderBookManager
 from src.quoting.quote_engine import QuoteEngine
 from src.utils.time import utc_now_iso
 
 logger = logging.getLogger(__name__)
+
 
 def format_top(top: dict) -> str:
     # Compact one-venue rendering for terminal output.
@@ -25,13 +26,14 @@ def format_top(top: dict) -> str:
 
     bid_px, bid_sz = best_bid
     ask_px, ask_sz = best_ask
-    return f"{bid_px:.2f}({bid_sz:.4f})/{ask_px:.2f}({ask_sz:.4f})"
+    return f"{bid_px:.2f}({bid_sz:.6f})/{ask_px:.2f}({ask_sz:.6f})"
+
 
 def format_quote_side(price: float | None, size: float | None) -> str:
     # Compact rendering for one quote side.
     if price is None or size is None:
         return "NA"
-    return f"{price:.2f} x {size:.4f}"
+    return f"{price:.2f} x {size:.6f}"
 
 
 def build_event_payload(event, top: dict, fv, quote, verbosity: int) -> dict:
@@ -68,6 +70,8 @@ def build_event_payload(event, top: dict, fv, quote, verbosity: int) -> dict:
                 "source": q.source,
                 "mid": round(q.mid, 2),
                 "spread": round(q.spread, 2),
+                "bid_size": round(q.bid_size, 6),
+                "ask_size": round(q.ask_size, 6),
                 "weight": round(q.weight, 4),
             }
             for q in fv.inputs
@@ -79,7 +83,6 @@ def build_event_payload(event, top: dict, fv, quote, verbosity: int) -> dict:
 async def print_books(queue: asyncio.Queue):
     # Single manager instance that tracks one local book per source.
     manager = OrderBookManager()
-
 
     # Fair-value engine built on top of maintained venue books.
     # The spread filter threshold is configured centrally to avoid hard-coded parameters here.
@@ -94,7 +97,7 @@ async def print_books(queue: asyncio.Queue):
             event = await queue.get()
             manager.apply_event(event)
             manager.refresh_staleness(VENUE_STALE_AFTER_SECONDS)
-            
+
             if OUTPUT_VERBOSITY >= 1:
                 top = manager.top_of_book(event.source)
                 fv = fair_value_engine.compute(manager)
@@ -113,7 +116,7 @@ async def print_books(queue: asyncio.Queue):
         while True:
             await asyncio.sleep(OUTPUT_INTERVAL_SECONDS)
             manager.refresh_staleness(VENUE_STALE_AFTER_SECONDS)
-            
+
             binance_top = manager.top_of_book("binance")
             coinbase_top = manager.top_of_book("coinbase")
             fv = fair_value_engine.compute(manager)

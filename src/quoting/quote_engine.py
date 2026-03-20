@@ -5,8 +5,12 @@ from src.config import (
     MAX_LONG_INVENTORY,
     MAX_SHORT_INVENTORY,
     QUOTE_BASE_SIZE,
+    QUOTE_DEGRADED_SIZE_MULTIPLIER,
+    QUOTE_DEGRADED_SPREAD_MULTIPLIER,
     QUOTE_HALF_SPREAD,
     QUOTE_INVENTORY_SKEW,
+    QUOTE_LIQUIDITY_PARTICIPATION,
+    QUOTE_MIN_SIZE_FACTOR,
 )
 from src.fair_value.fair_value import FairValueResult
 
@@ -46,6 +50,47 @@ class QuoteEngine:
         self.max_long_inventory = max_long_inventory
         self.max_short_inventory = max_short_inventory
 
+    def _status_half_spread(self, fair_value: FairValueResult) -> float:
+        # Widen quotes when fair value is based on only one usable venue.
+        if fair_value.status == "single_venue_only":
+            return self.half_spread * QUOTE_DEGRADED_SPREAD_MULTIPLIER
+        return self.half_spread
+
+    def _inventory_size_factor(self) -> float:
+        # Reduce quote size as inventory approaches hard limits.
+        if self.inventory > 0 and self.max_long_inventory > 0:
+            utilization = self.inventory / self.max_long_inventory
+        elif self.inventory < 0 and self.max_short_inventory < 0:
+            utilization = abs(self.inventory / self.max_short_inventory)
+        else:
+            utilization = 0.0
+
+        utilization = min(max(utilization, 0.0), 1.0)
+        return max(QUOTE_MIN_SIZE_FACTOR, 1.0 - utilization)
+
+    def _health_size_factor(self, fair_value: FairValueResult) -> float:
+        # Reduce quote size when fair value is supported by only one venue.
+        if fair_value.status == "single_venue_only":
+            return QUOTE_DEGRADED_SIZE_MULTIPLIER
+        return 1.0
+
+    def _liquidity_capped_size(self, fair_value: FairValueResult) -> float:
+        # Use a conservative fraction of visible top-of-book liquidity as a cap.
+        if not fair_value.inputs:
+            return self.base_size
+
+        visible_sizes = [
+            min(q.bid_size, q.ask_size)
+            for q in fair_value.inputs
+            if q.bid_size > 0 and q.ask_size > 0
+        ]
+
+        if not visible_sizes:
+            return self.base_size
+
+        liquidity_cap = min(visible_sizes) * QUOTE_LIQUIDITY_PARTICIPATION
+        return min(self.base_size, liquidity_cap)
+
     def compute(self, fair_value: FairValueResult) -> QuoteRecommendation:
         # If no fair value is available, quoting must be disabled.
         if fair_value.fair_value is None:
@@ -62,17 +107,26 @@ class QuoteEngine:
         # Reservation price shifts against current inventory.
         reservation_price = fair_value.fair_value - (self.inventory * self.inventory_skew)
 
-        bid_price = round(reservation_price - self.half_spread, 2)
-        ask_price = round(reservation_price + self.half_spread, 2)
+        half_spread = self._status_half_spread(fair_value)
 
-        bid_size = self.base_size
-        ask_size = self.base_size
+        bid_price = round(reservation_price - half_spread, 2)
+        ask_price = round(reservation_price + half_spread, 2)
 
-        # Distinguish whether fair value comes from one venue or multiple venues.
-        if len(fair_value.inputs) >= 2:
-            status = "active_two_sided"
+        raw_size = (
+            self._liquidity_capped_size(fair_value)
+            * self._inventory_size_factor()
+            * self._health_size_factor(fair_value)
+        )
+        size = round(raw_size, 4)
+
+        bid_size = size
+        ask_size = size
+
+        # Distinguish normal quoting from degraded single-venue quoting.
+        if fair_value.status == "single_venue_only":
+            status = "active_degraded_single_venue"
         else:
-            status = "active_single_venue"
+            status = "active_two_sided"
 
         # If inventory is too long, stop buying and only quote the ask side.
         if self.inventory >= self.max_long_inventory:
