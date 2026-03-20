@@ -1,14 +1,8 @@
-
----
-
-## DESIGN.md
-
-```markdown
 # Design Note
 
 ## Objectives
 
-The goal is to construct a simple but robust market-making system that:
+The goal is to construct a market-making system that:
 - operates on imperfect real-time market data
 - produces stable and explainable quotes
 - handles degraded data conditions safely
@@ -27,14 +21,14 @@ Binance is treated as the higher-confidence venue because:
 ### Coinbase
 
 Coinbase is handled in best-effort mode:
-- no strict sequencing guarantees
+- no strict sequencing guarantees are assumed
 - relies on level2 updates
 - periodic REST resync is required
 
 After resync or suspicious states:
 - Coinbase is temporarily excluded or down-weighted
 
-Conclusion:
+In practice:
 - Binance drives price discovery
 - Coinbase provides auxiliary information
 
@@ -51,6 +45,8 @@ Local corruption (e.g. crossed book) is handled per venue.
 
 Cross-venue inconsistencies are not treated as corruption.
 
+In particular, a negative synthetic spread (best bid greater than best ask across venues) is not treated as a crossed market. This condition can arise from asynchronous updates or temporary disagreement between venues.
+
 ---
 
 ## Fair Value Computation
@@ -61,26 +57,29 @@ Venues are excluded if:
 - spread is too wide
 - data is stale
 - recently resynced
-- mid price deviates too far from cross-venue median
+- mid price deviates too far from the cross-venue median
+
+Recently resynchronized venues are temporarily excluded to avoid trusting data immediately after recovery from a potentially inconsistent state.
 
 ### Weighting
 
-Remaining venues are weighted by:
-- relative spread (tighter is better)
+Remaining venues are weighted using:
+- inverse spread (tighter markets are preferred)
 - top-of-book liquidity
-- confidence penalty
+- a confidence penalty for lower-trust venues
+
+In practice, Binance typically dominates the fair value due to tighter spreads and larger visible size. Coinbase contributes but does not dominate.
 
 ### Cross-venue disagreement
 
 Disagreement is measured in basis points.
 
 It is used for:
-- filtering (extreme cases)
+- filtering in extreme cases
 - spread widening
-- size reduction
+- quote size reduction
 
-Important:
-A negative synthetic spread (best bid > best ask across venues) is **not treated as a crossed market**, but as asynchronous or disagreeing venues.
+Cross-venue disagreement is not treated as book corruption. Instead, it is handled as a degradation of market quality.
 
 ---
 
@@ -88,19 +87,19 @@ A negative synthetic spread (best bid > best ask across venues) is **not treated
 
 Market health reflects usability of the data:
 
-- **healthy**
-  - multiple venues
-  - low disagreement
+- healthy
+  - at least one high-confidence venue available
+  - disagreement within acceptable bounds
 
-- **degraded**
+- degraded
   - elevated disagreement
-  - or single high-confidence venue
+  - or only a single venue available
 
-- **unhealthy**
+- unhealthy
   - no usable venues
   - or only low-confidence venue
 
-Health influences quoting behavior but is separate from venue confidence.
+Market health affects quoting behavior but is separate from venue confidence.
 
 ---
 
@@ -129,25 +128,25 @@ Single-venue scenarios widen spreads.
 
 ### Size
 
-Quote size is determined as:
+Quote size is determined heuristically as:
 
-size = liquidity_cap × health × spread_factor × disagreement_factor
+size = liquidity_cap × health_factor × spread_factor × disagreement_factor
 
 Where:
 
-- **liquidity_cap**
-  - based on top-of-book size of highest-confidence venue
+- liquidity_cap  
+  based on top-of-book size of the highest-confidence active venue
 
-- **health factor**
-  - reduces size in degraded conditions
+- health_factor  
+  reduces size in degraded conditions
 
-- **spread factor**
-  - reduces size when spreads are wide
+- spread_factor  
+  reduces size when spreads are wide
 
-- **disagreement factor**
-  - reduces size when venues diverge
+- disagreement_factor  
+  reduces size when venues diverge
 
-Inventory does **not** reduce total size globally, only skews sides.
+Using only the highest-confidence venue for liquidity prevents a weak venue with small size from collapsing quote size.
 
 ---
 
@@ -157,15 +156,15 @@ Inventory affects:
 - reservation price (global shift)
 - side asymmetry (reduce size on risk-increasing side)
 
-It does not suppress both sides simultaneously.
+Inventory is not applied as a strong global size reduction to avoid double-counting risk and unintentionally suppressing both sides.
 
 ---
 
 ### Quote suppression
 
 Quoting is disabled when:
-- no fair value
-- only low-confidence venue available
+- no fair value is available
+- only a low-confidence venue is available
 - disagreement exceeds threshold
 - market health is unhealthy
 
@@ -173,11 +172,12 @@ Quoting is disabled when:
 
 ## Design Tradeoffs
 
-- Simplicity over complexity
-- Deterministic heuristics over predictive models
-- Explicit failure handling over implicit assumptions
+The system prioritizes:
+- simplicity over complexity
+- deterministic heuristics over predictive models
+- explicit failure handling over implicit assumptions
 
-The system is intentionally not optimized for:
+It is not optimized for:
 - PnL maximization
 - latency arbitrage
 - predictive signals
@@ -186,20 +186,17 @@ The system is intentionally not optimized for:
 
 ## Possible Extensions
 
+- dynamic venue trust scoring
 - latency-aware weighting
 - external reference prices (e.g. perpetual futures)
-- quote performance evaluation (markouts)
-- smoothing of fair value
-
-These were not implemented to keep the system transparent.
+- quote quality evaluation (markouts)
+- lightweight fair value smoothing
 
 ---
 
 ## Summary
 
-The system:
-- prioritizes data reliability over model sophistication
-- separates venue trust from market condition
-- produces stable and explainable quotes
-
-The result is a robust baseline market-making engine suitable for extension.
+The system separates:
+- venue trust from market condition
+- local book integrity from cross-venue disagreement
+- pricing from predictive modeling
