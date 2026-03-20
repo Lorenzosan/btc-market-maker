@@ -35,9 +35,13 @@ class FairValueEngine:
         # Pull one venue out of the manager and decide whether it is usable.
         state = manager.get_state(source)
 
-        if not state.initialized or not state.valid:
+        if not state.initialized:
             return None
-
+        if not state.valid:
+            return None
+        if state.is_stale:
+            return None
+        
         best_bid = state.book.best_bid()
         best_ask = state.book.best_ask()
 
@@ -51,7 +55,8 @@ class FairValueEngine:
         if spread <= 0:
             return None
 
-        # Exclude venues with excessive spread, as they likely indicate stale or unreliable data
+        # Exclude venues with excessive spread, as they likely indicate
+        # poor book quality or unreliable pricing for fair-value purposes.
         if spread > self.max_spread:
             return None
 
@@ -74,7 +79,7 @@ class FairValueEngine:
         # Collect usable venues from the current manager state.
         quotes: list[VenueQuote] = []
 
-        for source in manager.states.keys():
+        for source in sorted(manager.states.keys()):
             quote = self._extract_usable_quote(manager, source)
             if quote is not None:
                 quotes.append(quote)
@@ -98,8 +103,10 @@ class FairValueEngine:
         # USDT/USD basis is ignored for simplicity in this take-home version.
         fair_value = sum(q.mid * q.weight for q in quotes) / total_weight
 
+        status = "ok" if len(quotes) >= 2 else "single_venue_only"
+
         return FairValueResult(
             fair_value=round(fair_value, 2),
             inputs=quotes,
-            status="ok",
+            status=status,
         )

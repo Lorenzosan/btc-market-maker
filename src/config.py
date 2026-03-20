@@ -43,3 +43,8 @@ INITIAL_INVENTORY = 0.0
 # Maximum allowed spread (in price units) for a venue to be included in fair value
 # Venues with wider spreads are considered unreliable and excluded from the calculation
 FAIR_VALUE_MAX_SPREAD = 1.0
+
+# Maximum time since the last successfully applied venue update before the
+# venue is considered stale and excluded from fair value.
+VENUE_STALE_AFTER_SECONDS = 1.5
+

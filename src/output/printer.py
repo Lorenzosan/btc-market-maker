@@ -6,6 +6,7 @@ from src.config import (
     FAIR_VALUE_MAX_SPREAD,
     OUTPUT_INTERVAL_SECONDS,
     OUTPUT_VERBOSITY,
+    VENUE_STALE_AFTER_SECONDS,
 )
 from src.orderbook.manager import OrderBookManager
 from src.fair_value.fair_value import FairValueEngine
@@ -56,6 +57,9 @@ def build_event_payload(event, top: dict, fv, quote, verbosity: int) -> dict:
         "quote_ask_size": quote.ask_size,
         "quote_inventory": quote.inventory,
         "quote_status": quote.status,
+        "last_received_ts": top["last_received_ts"],
+        "age_ms": top["age_ms"],
+        "is_stale": top["is_stale"],
     }
 
     if verbosity >= 2:
@@ -89,7 +93,8 @@ async def print_books(queue: asyncio.Queue):
         while True:
             event = await queue.get()
             manager.apply_event(event)
-
+            manager.refresh_staleness(VENUE_STALE_AFTER_SECONDS)
+            
             if OUTPUT_VERBOSITY >= 1:
                 top = manager.top_of_book(event.source)
                 fv = fair_value_engine.compute(manager)
@@ -107,7 +112,8 @@ async def print_books(queue: asyncio.Queue):
 
         while True:
             await asyncio.sleep(OUTPUT_INTERVAL_SECONDS)
-
+            manager.refresh_staleness(VENUE_STALE_AFTER_SECONDS)
+            
             binance_top = manager.top_of_book("binance")
             coinbase_top = manager.top_of_book("coinbase")
             fv = fair_value_engine.compute(manager)
@@ -120,7 +126,7 @@ async def print_books(queue: asyncio.Queue):
             ask_str = format_quote_side(quote.ask_price, quote.ask_size)
 
             print(
-                f"ts={utc_now_iso()} | bin={binance_str} | cb={coinbase_str} | "
+                f"{utc_now_iso()} | bin={binance_str} | cb={coinbase_str} | "
                 f"fv={fv_str} | bid={bid_str} | ask={ask_str} | status={quote.status}",
                 flush=True,
             )
