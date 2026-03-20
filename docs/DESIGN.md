@@ -1,241 +1,205 @@
+
+---
+
+## DESIGN.md
+
+```markdown
 # Design Note
 
-## 1. Architecture Overview
+## Objectives
 
-The system ingests real-time BTC spot market data from multiple venues, maintains a local order book per venue, computes a consolidated fair value, and emits quote recommendations for a simple market making strategy.
-
-The architecture is composed of four main components:
-
-- Market data ingestion (per venue)
-- Local order book management
-- Fair value computation
-- Quote generation
-
-The system is designed to be event-driven, with exchange updates flowing through a central queue and applied to per-venue order books.
+The goal is to construct a simple but robust market-making system that:
+- operates on imperfect real-time market data
+- produces stable and explainable quotes
+- handles degraded data conditions safely
 
 ---
 
-## 2. Order Book Construction
+## Venue Handling
 
-Each venue maintains an independent local order book.
+### Binance
 
-### Snapshots
+Binance is treated as the higher-confidence venue because:
+- diff streams provide sequence-based updates
+- snapshot bridging ensures continuity
+- order book consistency can be verified
 
-- A snapshot initializes the full book state
-- Existing state is replaced entirely
-- The book is marked as initialized only after a snapshot is received
+### Coinbase
 
-### Incremental Updates
+Coinbase is handled in best-effort mode:
+- no strict sequencing guarantees
+- relies on level2 updates
+- periodic REST resync is required
 
-- Updates are applied as price-level deltas
-- Each update consists of price and size
-- Size equal to zero removes the level
-- Non-zero size inserts or updates the level
+After resync or suspicious states:
+- Coinbase is temporarily excluded or down-weighted
 
-### Validity Checks
-
-- A book is considered invalid if:
-  - it has not received a snapshot
-  - best bid is greater than or equal to best ask (crossed book)
-
-Invalid books are excluded from fair value computation.
-
-### Exchange-Specific Handling
-
-**Binance**
-- Uses snapshot + diff stream
-- Buffered updates are replayed after snapshot
-- Sequence numbers are checked
-- Gaps trigger a resynchronization
-
-**Coinbase**
-- Uses snapshot + level2 updates
-- Updates are applied after snapshot
-- No explicit sequence continuity validation is performed in this implementation
+Conclusion:
+- Binance drives price discovery
+- Coinbase provides auxiliary information
 
 ---
 
-## 3. Fair Value Estimation
+## Order Book Integrity
 
-Fair value is computed as a weighted average of venue mid prices.
+Each venue is tracked independently with:
+- initialization state
+- staleness detection
+- resync requirement flags
 
-### Mid Price
+Local corruption (e.g. crossed book) is handled per venue.
 
-For each valid venue:
+Cross-venue inconsistencies are not treated as corruption.
 
-mid = (best_bid + best_ask) / 2
+---
 
-### Weighting
-
-Each venue is weighted by the inverse of its spread:
-
-weight = 1 / spread
-
-where:
-
-spread = best_ask - best_bid
-
-### Aggregation
-
-fair_value = sum(mid_i * weight_i) / sum(weight_i)
+## Fair Value Computation
 
 ### Filtering
 
-A venue is excluded if:
+Venues are excluded if:
+- spread is too wide
+- data is stale
+- recently resynced
+- mid price deviates too far from cross-venue median
 
-- it is not initialized
-- it has a crossed book
-- spread is non-positive
-- spread exceeds a fixed threshold (`MAX_FAIR_VALUE_SPREAD`)
+### Weighting
 
-### Rationale
+Remaining venues are weighted by:
+- relative spread (tighter is better)
+- top-of-book liquidity
+- confidence penalty
 
-- Inverse-spread weighting favors tighter and more liquid markets
-- The method is simple, transparent, and robust enough for a baseline system
+### Cross-venue disagreement
 
-### Limitations
+Disagreement is measured in basis points.
 
-- No explicit freshness or staleness checks
-- No outlier rejection when venues disagree
-- No latency or timestamp weighting
-- Fixed spread threshold is heuristic
+It is used for:
+- filtering (extreme cases)
+- spread widening
+- size reduction
 
----
-
-## 4. Quote Logic
-
-The system produces a recommended bid and ask based on fair value and inventory.
-
-### Reservation Price
-
-reservation_price = fair_value - inventory * inventory_skew
-
-- Positive inventory shifts reservation price downward
-- Negative inventory shifts it upward
-
-### Quote Prices
-
-bid = reservation_price - half_spread  
-ask = reservation_price + half_spread
-
-### Quote Sizes
-
-- Fixed base size is used on both sides
-
-### Inventory Constraints
-
-- If inventory >= max_inventory:
-  - bid side is disabled
-- If inventory <= -max_inventory:
-  - ask side is disabled
-
-### Rationale
-
-- Inventory skew encourages reversion toward neutral inventory
-- Fixed spread ensures predictable quoting behavior
-
-### Limitations
-
-- No dynamic spread adjustment based on volatility or uncertainty
-- No adaptive sizing
-- No fill simulation or inventory updates from market interaction
+Important:
+A negative synthetic spread (best bid > best ask across venues) is **not treated as a crossed market**, but as asynchronous or disagreeing venues.
 
 ---
 
-## 5. Failure Modes
+## Market Health
 
-The system handles several failure scenarios.
+Market health reflects usability of the data:
 
-### Exchange Connectivity
+- **healthy**
+  - multiple venues
+  - low disagreement
 
-- Websocket disconnects trigger reconnect loops
+- **degraded**
+  - elevated disagreement
+  - or single high-confidence venue
 
-### Binance Sequence Gaps
+- **unhealthy**
+  - no usable venues
+  - or only low-confidence venue
 
-- Detected via sequence mismatch
-- Trigger a full resync via snapshot reload
-
-### Updates Before Snapshot
-
-- Ignored
-- Venue remains uninitialized
-
-### Crossed Books
-
-- Marked invalid
-- Excluded from fair value
-
-### No Valid Venues
-
-- Fair value is unavailable
-- Quoting is disabled
+Health influences quoting behavior but is separate from venue confidence.
 
 ---
 
-## 6. Assumptions
+## Quote Construction
 
-- Only public BTC spot order books are used
-- Best bid and ask are sufficient for fair value estimation
-- Inventory is maintained internally and is not updated from trades
-- Exchange data is assumed to be reasonably timely
-- Simplicity and robustness are prioritized over model sophistication
+### Reservation price
 
----
+Reservation price is adjusted by inventory:
 
-## 7. Intentionally Unhandled Edge Cases
+reservation_price = fair_value - inventory_utilization * skew
 
-The following are not handled in this implementation:
-
-- No stale-data timeout per venue
-- No clock synchronization or latency correction
-- No detection of delayed or frozen feeds
-- No advanced outlier filtering across venues
-- No persistence or recovery after restart
-- No replay or backtesting capability
-- Coinbase sequence validation is weaker than Binance
-
-These are acceptable omissions for a baseline implementation but would need to be addressed in production.
+Long inventory lowers quotes, short inventory raises them.
 
 ---
 
-## 8. Production Improvements
+### Spread
 
-If extended to production, the following changes would be required:
+Spread is determined by:
+- minimum configured spread
+- observed market spread
+- disagreement penalty
 
-### Market Data
+Single-venue scenarios widen spreads.
 
-- Per-venue freshness checks
-- Latency monitoring and feed health scoring
-- Redundant data sources
+---
 
-### Fair Value
+### Size
 
-- Outlier rejection across venues
-- Time-weighted or liquidity-weighted aggregation
-- Volatility-aware adjustments
+Quote size is determined as:
 
-### Quoting
+size = liquidity_cap × health × spread_factor × disagreement_factor
 
-- Dynamic spreads based on risk and market conditions
-- Adaptive sizing
-- Integration with execution and fill tracking
+Where:
 
-### Infrastructure
+- **liquidity_cap**
+  - based on top-of-book size of highest-confidence venue
 
-- Structured logging and metrics
-- Alerting on degraded states
-- Persistent state and warm restart
-- Containerization and deployment automation
+- **health factor**
+  - reduces size in degraded conditions
 
-### Testing
+- **spread factor**
+  - reduces size when spreads are wide
 
-- Replay-based tests using recorded market data
-- Integration tests across full pipeline
+- **disagreement factor**
+  - reduces size when venues diverge
+
+Inventory does **not** reduce total size globally, only skews sides.
+
+---
+
+### Inventory handling
+
+Inventory affects:
+- reservation price (global shift)
+- side asymmetry (reduce size on risk-increasing side)
+
+It does not suppress both sides simultaneously.
+
+---
+
+### Quote suppression
+
+Quoting is disabled when:
+- no fair value
+- only low-confidence venue available
+- disagreement exceeds threshold
+- market health is unhealthy
+
+---
+
+## Design Tradeoffs
+
+- Simplicity over complexity
+- Deterministic heuristics over predictive models
+- Explicit failure handling over implicit assumptions
+
+The system is intentionally not optimized for:
+- PnL maximization
+- latency arbitrage
+- predictive signals
+
+---
+
+## Possible Extensions
+
+- latency-aware weighting
+- external reference prices (e.g. perpetual futures)
+- quote performance evaluation (markouts)
+- smoothing of fair value
+
+These were not implemented to keep the system transparent.
 
 ---
 
 ## Summary
 
-This implementation provides a clean and functional baseline system for multi-venue market data aggregation, fair value computation, and quote generation.
+The system:
+- prioritizes data reliability over model sophistication
+- separates venue trust from market condition
+- produces stable and explainable quotes
 
-The design favors clarity and correctness, while explicitly documenting limitations and areas for extension.
+The result is a robust baseline market-making engine suitable for extension.
