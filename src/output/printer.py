@@ -3,7 +3,6 @@ import json
 import logging
 
 from src.config import (
-    FAIR_VALUE_MAX_SPREAD,
     OUTPUT_INTERVAL_SECONDS,
     OUTPUT_VERBOSITY,
     VENUE_STALE_AFTER_SECONDS,
@@ -52,6 +51,11 @@ def build_event_payload(event, top: dict, fv, quote, verbosity: int) -> dict:
         "status": top["status"],
         "fair_value": fv.fair_value,
         "fair_value_status": fv.status,
+        "fair_value_reference_mid": fv.reference_mid,
+        "fair_value_best_bid": fv.best_bid,
+        "fair_value_best_ask": fv.best_ask,
+        "fair_value_market_spread": fv.market_spread,
+        "fair_value_disagreement_bps": fv.disagreement_bps,
         "reservation_price": quote.reservation_price,
         "quote_bid_price": quote.bid_price,
         "quote_bid_size": quote.bid_size,
@@ -70,9 +74,12 @@ def build_event_payload(event, top: dict, fv, quote, verbosity: int) -> dict:
                 "source": q.source,
                 "mid": round(q.mid, 2),
                 "spread": round(q.spread, 2),
+                "spread_bps": round(q.spread_bps, 4),
                 "bid_size": round(q.bid_size, 6),
                 "ask_size": round(q.ask_size, 6),
-                "weight": round(q.weight, 4),
+                "top_size": round(q.top_size, 6),
+                "deviation_bps": round(q.deviation_bps, 4),
+                "weight": round(q.weight, 6),
             }
             for q in fv.inputs
         ]
@@ -85,8 +92,7 @@ async def print_books(queue: asyncio.Queue):
     manager = OrderBookManager()
 
     # Fair-value engine built on top of maintained venue books.
-    # The spread filter threshold is configured centrally to avoid hard-coded parameters here.
-    fair_value_engine = FairValueEngine(max_spread=FAIR_VALUE_MAX_SPREAD)
+    fair_value_engine = FairValueEngine()
 
     # Quote engine built on top of fair value.
     quote_engine = QuoteEngine()
@@ -109,7 +115,6 @@ async def print_books(queue: asyncio.Queue):
 
     async def reporter() -> None:
         # Emit one compact consolidated snapshot periodically in level-0 mode.
-        # The timestamp is the local reporting time in UTC.
         if OUTPUT_VERBOSITY != 0:
             return
 
@@ -127,10 +132,16 @@ async def print_books(queue: asyncio.Queue):
             fv_str = "NA" if fv.fair_value is None else f"{fv.fair_value:.2f}"
             bid_str = format_quote_side(quote.bid_price, quote.bid_size)
             ask_str = format_quote_side(quote.ask_price, quote.ask_size)
+            disagreement_str = (
+                "NA"
+                if fv.disagreement_bps is None
+                else f"{fv.disagreement_bps:.3f}bps"
+            )
 
             print(
                 f"{utc_now_iso()} | bin={binance_str} | cb={coinbase_str} | "
-                f"fv={fv_str} | bid={bid_str} | ask={ask_str} | status={quote.status}",
+                f"fv={fv_str} | disc={disagreement_str} | "
+                f"bid={bid_str} | ask={ask_str} | status={quote.status}",
                 flush=True,
             )
 

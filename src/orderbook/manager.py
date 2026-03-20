@@ -1,9 +1,11 @@
+import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
+from src.config import COINBASE_QUARANTINE_ON_CROSSED_BOOK
 from src.orderbook.book import OrderBook
 from src.types import MarketDataEvent
 
-import time
 
 @dataclass
 class BookState:
@@ -14,24 +16,31 @@ class BookState:
     initialized: bool = False
 
     # Whether the current local book looks internally valid.
-    # In this implementation, that mainly means "not crossed".
     valid: bool = False
 
     # Last known sequence information when available.
-    # This is meaningful for Binance, not for Coinbase level2_batch here.
     last_sequence: int | None = None
 
-    # Monotonic timestamp of the last successfully APPLIED update or snapshot.
-    # Must only be updated after the book has been modified.
+    # Monotonic timestamp of the last successfully applied event.
     last_update_monotonic: float | None = None
 
-    # Wall-clock timestamp (string) of the last received event.
-    # Used only for logging/output, not for logic.
+    # Wall-clock timestamp of the last received event.
     last_received_ts: str | None = None
 
+    # Last exchange timestamp that was accepted for this venue.
+    last_exchange_ts: str | float | int | None = None
+
     # Whether the venue is currently considered stale.
-    # True until first successful update is applied.
     is_stale: bool = True
+
+    # Whether the manager is refusing incremental updates until a new snapshot.
+    needs_resync: bool = False
+
+    # Monotonic timestamp of the most recent accepted snapshot.
+    last_snapshot_monotonic: float | None = None
+
+    # Monotonic timestamp of the most recent recovery snapshot after quarantine.
+    last_resync_monotonic: float | None = None
 
     # Human-readable state for logging and debugging.
     status: str = "waiting_for_snapshot"
@@ -40,6 +49,12 @@ class BookState:
         if self.last_update_monotonic is None:
             return None
         return (now_monotonic - self.last_update_monotonic) * 1000.0
+
+    def seconds_since_resync(self, now_monotonic: float) -> float | None:
+        if self.last_resync_monotonic is None:
+            return None
+        return now_monotonic - self.last_resync_monotonic
+
 
 @dataclass
 class OrderBookManager:
@@ -56,9 +71,65 @@ class OrderBookManager:
         # Record freshness only after a snapshot or update has been applied.
         state.last_update_monotonic = time.monotonic()
         state.last_received_ts = event.received_ts
+        state.last_exchange_ts = event.exchange_ts
         state.is_stale = False
 
-    def refresh_staleness(self, stale_after_s: float, now_monotonic: float | None = None) -> None:
+    def _parse_exchange_ts(self, value: str | float | int | None) -> datetime | None:
+        # Parse either ISO strings or numeric unix timestamps.
+        if value is None:
+            return None
+
+        if isinstance(value, datetime):
+            if value.tzinfo is None:
+                return value.replace(tzinfo=timezone.utc)
+            return value.astimezone(timezone.utc)
+
+        if isinstance(value, (int, float)):
+            return datetime.fromtimestamp(float(value), tz=timezone.utc)
+        
+        if isinstance(value, str):
+            normalized = value.replace("Z", "+00:00")
+            return datetime.fromisoformat(normalized).astimezone(timezone.utc)
+        
+        # Unknown timestamp format. Ignore monotonicity validation instead of crashing.
+        return None
+
+    def _is_exchange_ts_backwards(self, state: BookState, event: MarketDataEvent) -> bool:
+        # Reject obviously older exchange timestamps for Coinbase updates.
+        current_ts = self._parse_exchange_ts(event.exchange_ts)
+        previous_ts = self._parse_exchange_ts(state.last_exchange_ts)
+
+        if current_ts is None or previous_ts is None:
+            return False
+
+        return current_ts < previous_ts
+
+    def _apply_snapshot(self, state: BookState, event: MarketDataEvent) -> None:
+        # Snapshot replaces the full local book state for that venue.
+        was_waiting_for_resync = state.needs_resync
+
+        state.book.apply_snapshot(event.bid_updates, event.ask_updates)
+        state.initialized = True
+        state.valid = not state.book.is_crossed()
+        state.last_sequence = event.sequence
+        state.needs_resync = False
+        state.status = "ok" if state.valid else "crossed_after_snapshot"
+        self._mark_update_applied(state, event)
+
+        now_monotonic = state.last_update_monotonic
+        state.last_snapshot_monotonic = now_monotonic
+
+        if was_waiting_for_resync and state.valid:
+            state.last_resync_monotonic = now_monotonic
+
+        if not state.valid:
+            state.needs_resync = True
+
+    def refresh_staleness(
+        self,
+        stale_after_s: float,
+        now_monotonic: float | None = None,
+    ) -> None:
         # Recompute stale status for all venues from the monotonic clock.
         if now_monotonic is None:
             now_monotonic = time.monotonic()
@@ -75,41 +146,49 @@ class OrderBookManager:
         state = self.get_state(event.source)
 
         if event.event_type == "snapshot":
-            # Snapshot replaces the full local book state for that venue.
-            state.book.apply_snapshot(event.bid_updates, event.ask_updates)
-            state.initialized = True
-            state.valid = not state.book.is_crossed()
-            state.last_sequence = event.sequence
-            state.status = "ok" if state.valid else "crossed_after_snapshot"
-            self._mark_update_applied(state, event)
+            self._apply_snapshot(state, event)
             return
 
         if event.event_type != "update":
             raise ValueError(f"unsupported event_type: {event.event_type}")
 
-        # Never apply updates before a snapshot because there is no base state.
         if not state.initialized:
             state.valid = False
             state.status = "update_before_snapshot"
             return
 
         if event.source == "binance":
-            # Binance sequencing has already been validated in the connector.
-            # The manager therefore only applies the already-sanitized update.
             state.book.apply_update(event.bid_updates, event.ask_updates)
             state.valid = not state.book.is_crossed()
             state.last_sequence = event.sequence
             state.status = "ok" if state.valid else "crossed_after_update"
             self._mark_update_applied(state, event)
+
+            if not state.valid:
+                state.needs_resync = True
+
             return
 
         if event.source == "coinbase":
-            # Coinbase public level2_batch does not expose the same explicit
-            # numeric continuity mechanism used in the Binance connector here.
-            # We still maintain the book from snapshot plus updates.
+            if state.needs_resync:
+                state.status = "waiting_for_resync_snapshot"
+                return
+
+            if self._is_exchange_ts_backwards(state, event):
+                state.valid = False
+                state.needs_resync = True
+                state.status = "coinbase_non_monotonic_exchange_ts"
+                return
+
             state.book.apply_update(event.bid_updates, event.ask_updates)
             state.valid = not state.book.is_crossed()
-            state.status = "ok_no_sequence_validation" if state.valid else "crossed_after_update"
+            state.last_sequence = event.sequence
+            state.status = "ok_best_effort"
+
+            if not state.valid and COINBASE_QUARANTINE_ON_CROSSED_BOOK:
+                state.needs_resync = True
+                state.status = "coinbase_crossed_waiting_for_resync"
+
             self._mark_update_applied(state, event)
             return
 
@@ -136,6 +215,10 @@ class OrderBookManager:
         if age_ms is not None:
             age_ms = round(age_ms, 1)
 
+        seconds_since_resync = state.seconds_since_resync(now_monotonic)
+        if seconds_since_resync is not None:
+            seconds_since_resync = round(seconds_since_resync, 3)
+
         return {
             "source": source,
             "best_bid": best_bid,
@@ -146,7 +229,10 @@ class OrderBookManager:
             "valid": state.valid,
             "last_sequence": state.last_sequence,
             "last_received_ts": state.last_received_ts,
+            "last_exchange_ts": state.last_exchange_ts,
             "age_ms": age_ms,
             "is_stale": state.is_stale,
+            "needs_resync": state.needs_resync,
+            "seconds_since_resync": seconds_since_resync,
             "status": state.status,
         }

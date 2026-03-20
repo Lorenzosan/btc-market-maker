@@ -135,7 +135,7 @@ def test_coinbase_update_has_no_sequence_validation_status_and_refreshes_freshne
     assert state.last_update_monotonic is not None
     assert state.last_received_ts == "2026-03-20T12:00:01Z"
     assert state.is_stale is False
-    assert state.status == "ok_no_sequence_validation"
+    assert state.status == "ok_best_effort"
     assert state.book.best_bid() == (100.5, 1.2)
 
 

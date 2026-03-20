@@ -3,203 +3,101 @@ from src.orderbook.manager import OrderBookManager
 from src.types import MarketDataEvent
 
 
-def test_no_usable_venues_returns_none():
-    manager = OrderBookManager()
-    engine = FairValueEngine(max_spread=1.0)
-
-    result = engine.compute(manager)
-
-    assert result.fair_value is None
-    assert result.inputs == []
-    assert result.status == "no_usable_venues"
-
-
-def test_single_venue_fair_value_equals_mid():
-    manager = OrderBookManager()
-    engine = FairValueEngine(max_spread=1.0)
-
-    snapshot = MarketDataEvent(
-        source="binance",
-        symbol="BTCUSDT",
+def make_snapshot(source: str, symbol: str, bid: tuple[float, float], ask: tuple[float, float]):
+    return MarketDataEvent(
+        source=source,
+        symbol=symbol,
         channel="depth",
         event_type="snapshot",
-        bid_updates=[(100.0, 1.0)],
-        ask_updates=[(101.0, 1.0)],
-        sequence=10,
-        exchange_ts=0.0,
+        exchange_ts=None,
         received_ts="2026-03-20T12:00:00Z",
+        sequence=1 if source == "binance" else None,
+        bid_updates=[bid],
+        ask_updates=[ask],
+        raw={},
     )
-    manager.apply_event(snapshot)
-
-    result = engine.compute(manager)
-
-    assert result.fair_value == 100.5
-    assert result.status == "single_venue_only"
-    assert len(result.inputs) == 1
-    assert result.inputs[0].source == "binance"
 
 
-def test_inverse_spread_weighting():
+def test_compute_returns_none_when_no_usable_venues():
     manager = OrderBookManager()
-    engine = FairValueEngine(max_spread=2.0)
-
-    manager.apply_event(
-        MarketDataEvent(
-            source="binance",
-            symbol="BTCUSDT",
-            channel="depth",
-            event_type="snapshot",
-            bid_updates=[(100.0, 1.0)],
-            ask_updates=[(101.0, 1.0)],
-            sequence=10,
-            exchange_ts=0.0,
-            received_ts="2026-03-20T12:00:00Z",
-        )
-    )
-
-    manager.apply_event(
-        MarketDataEvent(
-            source="coinbase",
-            symbol="BTC-USD",
-            channel="level2",
-            event_type="snapshot",
-            bid_updates=[(100.0, 1.0)],
-            ask_updates=[(100.5, 1.0)],
-            sequence=None,
-            exchange_ts=0.0,
-            received_ts="2026-03-20T12:00:00Z",
-        )
-    )
-
-    result = engine.compute(manager)
-
-    expected = round(((100.5 * 1.0) + (100.25 * 2.0)) / 3.0, 2)
-    assert result.fair_value == expected
-    assert result.status == "ok"
-    assert len(result.inputs) == 2
-
-
-def test_wide_spread_venue_is_excluded():
-    manager = OrderBookManager()
-    engine = FairValueEngine(max_spread=1.0)
-
-    manager.apply_event(
-        MarketDataEvent(
-            source="binance",
-            symbol="BTCUSDT",
-            channel="depth",
-            event_type="snapshot",
-            bid_updates=[(100.0, 1.0)],
-            ask_updates=[(101.0, 1.0)],
-            sequence=10,
-            exchange_ts=0.0,
-            received_ts="2026-03-20T12:00:00Z",
-        )
-    )
-
-    manager.apply_event(
-        MarketDataEvent(
-            source="coinbase",
-            symbol="BTC-USD",
-            channel="level2",
-            event_type="snapshot",
-            bid_updates=[(90.0, 1.0)],
-            ask_updates=[(110.0, 1.0)],
-            sequence=None,
-            exchange_ts=0.0,
-            received_ts="2026-03-20T12:00:00Z",
-        )
-    )
-
-    result = engine.compute(manager)
-
-    assert result.fair_value == 100.5
-    assert result.status == "single_venue_only"
-    assert len(result.inputs) == 1
-    assert result.inputs[0].source == "binance"
-
-def test_stale_venue_is_excluded_from_fair_value():
-    manager = OrderBookManager()
-    engine = FairValueEngine(max_spread=2.0)
-
-    manager.apply_event(
-        MarketDataEvent(
-            source="binance",
-            symbol="BTCUSDT",
-            channel="depth",
-            event_type="snapshot",
-            bid_updates=[(100.0, 1.0)],
-            ask_updates=[(101.0, 1.0)],
-            sequence=10,
-            exchange_ts=0.0,
-            received_ts="2026-03-20T12:00:00Z",
-        )
-    )
-
-    manager.apply_event(
-        MarketDataEvent(
-            source="coinbase",
-            symbol="BTC-USD",
-            channel="level2",
-            event_type="snapshot",
-            bid_updates=[(100.0, 1.0)],
-            ask_updates=[(100.5, 1.0)],
-            sequence=None,
-            exchange_ts=0.0,
-            received_ts="2026-03-20T12:00:00Z",
-        )
-    )
-
-    binance_state = manager.get_state("binance")
-    coinbase_state = manager.get_state("coinbase")
-
-    binance_state.last_update_monotonic = 100.0
-    coinbase_state.last_update_monotonic = 100.3
-    binance_state.is_stale = False
-    coinbase_state.is_stale = False
-
-    manager.refresh_staleness(
-        stale_after_s=1.5,
-        now_monotonic=101.6,
-    )
-
-    result = engine.compute(manager)
-
-    assert binance_state.is_stale is True
-    assert coinbase_state.is_stale is False
-    assert result.fair_value == 100.25
-    assert result.status == "single_venue_only"
-    assert len(result.inputs) == 1
-    assert result.inputs[0].source == "coinbase"
-
-def test_all_stale_venues_return_no_usable_venues():
-    manager = OrderBookManager()
-    engine = FairValueEngine(max_spread=2.0)
-
-    manager.apply_event(
-        MarketDataEvent(
-            source="binance",
-            symbol="BTCUSDT",
-            channel="depth",
-            event_type="snapshot",
-            bid_updates=[(100.0, 1.0)],
-            ask_updates=[(101.0, 1.0)],
-            sequence=10,
-            exchange_ts=0.0,
-            received_ts="2026-03-20T12:00:00Z",
-        )
-    )
-
-    state = manager.get_state("binance")
-    assert state.last_update_monotonic is not None
-
-    manager.refresh_staleness(
-        stale_after_s=1.5,
-        now_monotonic=state.last_update_monotonic + 2.0,
-    )
+    engine = FairValueEngine()
 
     result = engine.compute(manager)
 
     assert result.fair_value is None
-    assert result.inputs == []
     assert result.status == "no_usable_venues"
+    assert result.inputs == []
+    assert result.excluded_inputs == []
+    assert result.market_health == "unhealthy"
+    assert result.confidence_profile == "none"
+
+
+def test_coinbase_weight_is_penalized_vs_binance():
+    manager = OrderBookManager()
+    manager.apply_event(make_snapshot("binance", "BTCUSDT", (100.0, 10.0), (100.2, 10.0)))
+    manager.apply_event(make_snapshot("coinbase", "BTC-USD", (100.0, 10.0), (100.2, 10.0)))
+
+    engine = FairValueEngine(max_spread_bps=50.0, low_confidence_penalty=0.25)
+    result = engine.compute(manager)
+
+    assert len(result.inputs) == 2
+
+    by_source = {quote.source: quote for quote in result.inputs}
+    assert by_source["binance"].weight > by_source["coinbase"].weight
+    assert by_source["binance"].confidence == "high"
+    assert by_source["coinbase"].confidence == "low"
+    assert result.market_health == "healthy"
+    assert result.confidence_profile == "mixed"
+
+
+def test_recently_resynced_venue_is_temporarily_excluded():
+    manager = OrderBookManager()
+
+    manager.apply_event(make_snapshot("binance", "BTCUSDT", (100.0, 5.0), (100.2, 5.0)))
+
+    coinbase_state = manager.get_state("coinbase")
+    manager.apply_event(make_snapshot("coinbase", "BTC-USD", (100.0, 5.0), (100.2, 5.0)))
+    coinbase_state.last_resync_monotonic = coinbase_state.last_update_monotonic
+
+    engine = FairValueEngine(max_spread_bps=50.0, exclude_after_resync_seconds=30.0)
+    result = engine.compute(manager)
+
+    assert result.status == "single_venue_only"
+    assert len(result.inputs) == 1
+    assert result.inputs[0].source == "binance"
+    assert len(result.excluded_inputs) == 1
+    assert result.excluded_inputs[0].source == "coinbase"
+    assert result.excluded_inputs[0].excluded_reason == "recent_resync_cooldown"
+    assert result.market_health == "degraded"
+    assert result.confidence_profile == "high_only"
+
+
+def test_compute_filters_all_venues_when_two_remaining_venues_are_too_far_apart():
+    manager = OrderBookManager()
+    manager.apply_event(make_snapshot("binance", "BTCUSDT", (100.0, 5.0), (100.2, 5.0)))
+    manager.apply_event(make_snapshot("coinbase", "BTC-USD", (110.0, 5.0), (110.2, 5.0)))
+
+    engine = FairValueEngine(max_spread_bps=50.0, max_deviation_bps=20.0)
+    result = engine.compute(manager)
+
+    assert result.fair_value is None
+    assert result.status == "all_venues_filtered"
+    assert result.market_health == "unhealthy"
+    assert result.confidence_profile == "none"
+    assert len(result.inputs) == 0
+    assert len(result.excluded_inputs) == 2
+    assert {quote.source for quote in result.excluded_inputs} == {"binance", "coinbase"}
+    assert all(quote.excluded_reason == "mid_outlier" for quote in result.excluded_inputs)
+
+def test_single_low_confidence_venue_status_is_explicit():
+    manager = OrderBookManager()
+    manager.apply_event(make_snapshot("coinbase", "BTC-USD", (100.0, 1.0), (100.2, 1.0)))
+
+    engine = FairValueEngine(max_spread_bps=50.0)
+    result = engine.compute(manager)
+
+    assert result.status == "single_low_confidence_venue"
+    assert result.market_health == "unhealthy"
+    assert result.confidence_profile == "low_only"
+    assert result.low_confidence_source_count == 1
+    assert result.fair_value == 100.1

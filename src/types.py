@@ -20,7 +20,9 @@ class MarketDataEvent:
     event_type: Literal["snapshot", "update"]
 
     # Exchange-provided timestamp when available.
-    exchange_ts: Optional[str]
+    # This may be an ISO string or a numeric unix timestamp, depending on source
+    # and on how tests construct synthetic events.
+    exchange_ts: Optional[str | float | int]
 
     # Local receive timestamp.
     received_ts: str
@@ -38,3 +40,6 @@ class MarketDataEvent:
 
     # Raw venue payload kept for debugging.
     raw: Optional[dict] = None
+
+
+    

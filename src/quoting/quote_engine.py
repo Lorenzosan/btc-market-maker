@@ -7,12 +7,25 @@ from src.config import (
     QUOTE_BASE_SIZE,
     QUOTE_DEGRADED_SIZE_MULTIPLIER,
     QUOTE_DEGRADED_SPREAD_MULTIPLIER,
-    QUOTE_HALF_SPREAD,
+    QUOTE_DISAGREEMENT_SPREAD_PER_BPS,
     QUOTE_INVENTORY_SKEW,
     QUOTE_LIQUIDITY_PARTICIPATION,
+    QUOTE_MARKET_EDGE_BUFFER,
+    QUOTE_MIN_ABSOLUTE_SIZE,
+    QUOTE_MIN_HALF_SPREAD,
     QUOTE_MIN_SIZE_FACTOR,
+    QUOTE_SIZE_DEGRADED_MULTIPLIER,
+    QUOTE_SIZE_HEALTHY_MULTIPLIER,
+    QUOTE_SIZE_MAX_DISAGREEMENT_BPS,
+    QUOTE_SIZE_MIN_DISAGREEMENT_FACTOR,
+    QUOTE_SIZE_MIN_SPREAD_FACTOR,
+    QUOTE_SIZE_SPREAD_TARGET_BPS,
+    QUOTE_SIZE_UNHEALTHY_MULTIPLIER,
+    QUOTE_SUPPRESS_CROSSED_MARKET,
+    QUOTE_SUPPRESS_MAX_DISAGREEMENT_BPS,
+    QUOTE_SUPPRESS_SINGLE_LOW_CONFIDENCE,
 )
-from src.fair_value.fair_value import FairValueResult
+from src.fair_value.fair_value import FairValueResult, VenueQuote
 
 
 @dataclass
@@ -37,94 +50,268 @@ class QuoteEngine:
     def __init__(
         self,
         base_size: float = QUOTE_BASE_SIZE,
-        half_spread: float = QUOTE_HALF_SPREAD,
+        min_half_spread: float = QUOTE_MIN_HALF_SPREAD,
         inventory_skew: float = QUOTE_INVENTORY_SKEW,
         inventory: float = INITIAL_INVENTORY,
         max_long_inventory: float = MAX_LONG_INVENTORY,
         max_short_inventory: float = MAX_SHORT_INVENTORY,
     ) -> None:
         self.base_size = base_size
-        self.half_spread = half_spread
+        self.min_half_spread = min_half_spread
         self.inventory_skew = inventory_skew
         self.inventory = inventory
         self.max_long_inventory = max_long_inventory
         self.max_short_inventory = max_short_inventory
 
-    def _status_half_spread(self, fair_value: FairValueResult) -> float:
-        # Widen quotes when fair value is based on only one usable venue.
-        if fair_value.status == "single_venue_only":
-            return self.half_spread * QUOTE_DEGRADED_SPREAD_MULTIPLIER
-        return self.half_spread
-
-    def _inventory_size_factor(self) -> float:
-        # Reduce quote size as inventory approaches hard limits.
-        if self.inventory > 0 and self.max_long_inventory > 0:
+    def _inventory_utilization(self) -> float:
+        # Normalize inventory to a symmetric range around zero.
+        if self.inventory >= 0 and self.max_long_inventory > 0:
             utilization = self.inventory / self.max_long_inventory
         elif self.inventory < 0 and self.max_short_inventory < 0:
-            utilization = abs(self.inventory / self.max_short_inventory)
+            utilization = self.inventory / abs(self.max_short_inventory)
         else:
             utilization = 0.0
 
-        utilization = min(max(utilization, 0.0), 1.0)
-        return max(QUOTE_MIN_SIZE_FACTOR, 1.0 - utilization)
+        return min(max(utilization, -1.0), 1.0)
+
+    def _should_suppress(self, fair_value: FairValueResult) -> str | None:
+        # Suppress quotes when the market state is too weak to trust.
+        if fair_value.fair_value is None:
+            return "inactive_no_fair_value"
+
+        if (
+            QUOTE_SUPPRESS_SINGLE_LOW_CONFIDENCE
+            and fair_value.status == "single_low_confidence_venue"
+        ):
+            return "inactive_single_low_confidence_venue"
+
+        if (
+            fair_value.disagreement_bps is not None
+            and fair_value.disagreement_bps >= QUOTE_SUPPRESS_MAX_DISAGREEMENT_BPS
+        ):
+            return "inactive_excessive_disagreement"
+
+        if (
+            QUOTE_SUPPRESS_CROSSED_MARKET
+            and fair_value.market_spread is not None
+            and fair_value.market_spread <= 0
+        ):
+            return "inactive_crossed_market"
+
+        if fair_value.market_health == "unhealthy":
+            return "inactive_unhealthy_market"
+
+        return None
+
+    def _status_half_spread(self, fair_value: FairValueResult) -> float:
+        # The live market spread is a lower bound for quoting width.
+        market_half_spread = 0.0
+        if fair_value.market_spread is not None:
+            market_half_spread = max(fair_value.market_spread / 2.0, 0.0)
+
+        # Venue disagreement widens the quote envelope when books diverge.
+        disagreement_component = 0.0
+        if fair_value.disagreement_bps is not None:
+            disagreement_component = (
+                fair_value.disagreement_bps * QUOTE_DISAGREEMENT_SPREAD_PER_BPS
+            )
+
+        half_spread = max(
+            self.min_half_spread,
+            market_half_spread + disagreement_component,
+        )
+
+        if fair_value.status in {"single_venue_only", "single_low_confidence_venue"}:
+            half_spread *= QUOTE_DEGRADED_SPREAD_MULTIPLIER
+
+        return half_spread
+
+    def _preferred_size_inputs(self, fair_value: FairValueResult) -> list[VenueQuote]:
+        # Use the highest-confidence active venues for liquidity sizing.
+        high_confidence_inputs = [
+            quote for quote in fair_value.inputs if quote.confidence == "high"
+        ]
+        if high_confidence_inputs:
+            return high_confidence_inputs
+        return fair_value.inputs
+
+    def _trusted_size_reference(self, fair_value: FairValueResult) -> VenueQuote | None:
+        # Use the tightest highest-confidence venue as the primary sizing reference.
+        size_inputs = self._preferred_size_inputs(fair_value)
+        if not size_inputs:
+            return None
+
+        return min(size_inputs, key=lambda quote: quote.spread_bps)
+
+    def _liquidity_cap(self, fair_value: FairValueResult) -> float:
+        # Cap quote size using trusted visible top-of-book liquidity.
+        reference = self._trusted_size_reference(fair_value)
+        if reference is None:
+            return self.base_size
+
+        trusted_top_size = min(reference.bid_size, reference.ask_size)
+        liquidity_cap = trusted_top_size * QUOTE_LIQUIDITY_PARTICIPATION
+        return min(self.base_size, liquidity_cap)
 
     def _health_size_factor(self, fair_value: FairValueResult) -> float:
-        # Reduce quote size when fair value is supported by only one venue.
-        if fair_value.status == "single_venue_only":
-            return QUOTE_DEGRADED_SIZE_MULTIPLIER
-        return 1.0
+        # Scale size by current market-health state.
+        if fair_value.market_health == "healthy":
+            return QUOTE_SIZE_HEALTHY_MULTIPLIER
 
-    def _liquidity_capped_size(self, fair_value: FairValueResult) -> float:
-        # Use a conservative fraction of visible top-of-book liquidity as a cap.
-        if not fair_value.inputs:
-            return self.base_size
+        if fair_value.market_health == "degraded":
+            return QUOTE_SIZE_DEGRADED_MULTIPLIER
 
-        visible_sizes = [
-            min(q.bid_size, q.ask_size)
-            for q in fair_value.inputs
-            if q.bid_size > 0 and q.ask_size > 0
-        ]
+        return QUOTE_SIZE_UNHEALTHY_MULTIPLIER
 
-        if not visible_sizes:
-            return self.base_size
+    def _spread_size_factor(self, fair_value: FairValueResult) -> float:
+        # Reduce size when the trusted venue spread is wide in bps, but do not
+        # collapse normal quoting entirely because synthetic tests often use much
+        # wider spreads than live BTC top-of-book.
+        reference = self._trusted_size_reference(fair_value)
+        if reference is None:
+            return 0.0
 
-        liquidity_cap = min(visible_sizes) * QUOTE_LIQUIDITY_PARTICIPATION
-        return min(self.base_size, liquidity_cap)
+        raw_factor = QUOTE_SIZE_SPREAD_TARGET_BPS / max(
+            reference.spread_bps,
+            QUOTE_SIZE_SPREAD_TARGET_BPS,
+        )
+        return max(QUOTE_SIZE_MIN_SPREAD_FACTOR, min(raw_factor, 1.0))
+
+    def _disagreement_size_factor(self, fair_value: FairValueResult) -> float:
+        # Reduce size as venues disagree more, but keep a floor until hard
+        # suppression is triggered by the separate disagreement threshold.
+        if fair_value.disagreement_bps is None:
+            return 0.0
+
+        disagreement = max(fair_value.disagreement_bps, 0.0)
+        scaled = 1.0 - min(disagreement / QUOTE_SIZE_MAX_DISAGREEMENT_BPS, 1.0)
+        return max(QUOTE_SIZE_MIN_DISAGREEMENT_FACTOR, min(scaled, 1.0))
+
+    def _side_size_adjustment(self) -> tuple[float, float]:
+        # Tilt size away from the side that would worsen inventory.
+        utilization = self._inventory_utilization()
+
+        if utilization > 0:
+            bid_factor = max(QUOTE_MIN_SIZE_FACTOR, 1.0 - utilization)
+            ask_factor = 1.0
+            return bid_factor, ask_factor
+
+        if utilization < 0:
+            bid_factor = 1.0
+            ask_factor = max(QUOTE_MIN_SIZE_FACTOR, 1.0 - abs(utilization))
+            return bid_factor, ask_factor
+
+        return 1.0, 1.0
+
+    def _clamp_to_market(
+        self,
+        fair_value: FairValueResult,
+        bid_price: float,
+        ask_price: float,
+    ) -> tuple[float, float]:
+        # Avoid crossing or locking the visible market.
+        if fair_value.best_bid is not None:
+            bid_price = min(bid_price, fair_value.best_bid - QUOTE_MARKET_EDGE_BUFFER)
+
+        if fair_value.best_ask is not None:
+            ask_price = max(ask_price, fair_value.best_ask + QUOTE_MARKET_EDGE_BUFFER)
+
+        return bid_price, ask_price
+
+    def _finalize_side(
+        self,
+        price: float,
+        size: float,
+    ) -> tuple[float | None, float | None]:
+        # Drop any quote side that rounds below the minimum actionable size.
+        rounded_size = round(size, 4)
+        if rounded_size < QUOTE_MIN_ABSOLUTE_SIZE:
+            return None, None
+
+        return round(price, 2), rounded_size
 
     def compute(self, fair_value: FairValueResult) -> QuoteRecommendation:
         # If no fair value is available, quoting must be disabled.
-        if fair_value.fair_value is None:
+        suppress_status = self._should_suppress(fair_value)
+        if suppress_status is not None:
             return QuoteRecommendation(
-                reservation_price=None,
+                reservation_price=None if fair_value.fair_value is None else fair_value.fair_value,
                 bid_price=None,
                 bid_size=None,
                 ask_price=None,
                 ask_size=None,
                 inventory=self.inventory,
-                status="inactive_no_fair_value",
+                status=suppress_status,
             )
 
         # Reservation price shifts against current inventory.
-        reservation_price = fair_value.fair_value - (self.inventory * self.inventory_skew)
+        reservation_price = fair_value.fair_value - (
+            self._inventory_utilization() * self.inventory_skew
+        )
 
         half_spread = self._status_half_spread(fair_value)
 
-        bid_price = round(reservation_price - half_spread, 2)
-        ask_price = round(reservation_price + half_spread, 2)
-
-        raw_size = (
-            self._liquidity_capped_size(fair_value)
-            * self._inventory_size_factor()
-            * self._health_size_factor(fair_value)
+        raw_bid_price = reservation_price - half_spread
+        raw_ask_price = reservation_price + half_spread
+        raw_bid_price, raw_ask_price = self._clamp_to_market(
+            fair_value,
+            raw_bid_price,
+            raw_ask_price,
         )
-        size = round(raw_size, 4)
 
-        bid_size = size
-        ask_size = size
+        # A bad clamp can invert the quote when fair value is too close to the
+        # live market. Fall back to a passive symmetric placement around fair value.
+        if raw_bid_price >= raw_ask_price:
+            fallback_half_spread = max(
+                half_spread,
+                self.min_half_spread,
+                (fair_value.market_spread or 0.0) + QUOTE_MARKET_EDGE_BUFFER,
+            )
+            raw_bid_price = fair_value.fair_value - fallback_half_spread
+            raw_ask_price = fair_value.fair_value + fallback_half_spread
+            raw_bid_price, raw_ask_price = self._clamp_to_market(
+                fair_value,
+                raw_bid_price,
+                raw_ask_price,
+            )
 
-        # Distinguish normal quoting from degraded single-venue quoting.
+        base_size = self._liquidity_cap(fair_value)
+        health_factor = self._health_size_factor(fair_value)
+        spread_factor = self._spread_size_factor(fair_value)
+        disagreement_factor = self._disagreement_size_factor(fair_value)
+
+        # Inventory affects side balance, not the global size budget. Applying it
+        # globally and per-side double-counts inventory pressure and makes one side
+        # disappear too easily in normal tests.
+        raw_size = (
+            base_size
+            * health_factor
+            * spread_factor
+            * disagreement_factor
+        )
+
+        if fair_value.status in {"single_venue_only", "single_low_confidence_venue"}:
+            raw_size *= QUOTE_DEGRADED_SIZE_MULTIPLIER
+
+        bid_size_factor, ask_size_factor = self._side_size_adjustment()
+
+        bid_price, bid_size = self._finalize_side(
+            raw_bid_price,
+            raw_size * bid_size_factor,
+        )
+        ask_price, ask_size = self._finalize_side(
+            raw_ask_price,
+            raw_size * ask_size_factor,
+        )
+
         if fair_value.status == "single_venue_only":
             status = "active_degraded_single_venue"
+        elif fair_value.status == "single_low_confidence_venue":
+            status = "active_degraded_low_confidence_venue"
+        elif fair_value.status == "ok_filtered":
+            status = "active_filtered"
+        elif fair_value.market_health == "degraded":
+            status = "active_degraded"
         else:
             status = "active_two_sided"
 
@@ -139,6 +326,19 @@ class QuoteEngine:
             ask_price = None
             ask_size = None
             status = "bid_only_inventory_limit"
+
+        # If both sides are too small to quote after rounding, do not pretend the
+        # engine is active.
+        if bid_price is None and ask_price is None:
+            return QuoteRecommendation(
+                reservation_price=round(reservation_price, 2),
+                bid_price=None,
+                bid_size=None,
+                ask_price=None,
+                ask_size=None,
+                inventory=self.inventory,
+                status="inactive_size_too_small",
+            )
 
         return QuoteRecommendation(
             reservation_price=round(reservation_price, 2),
