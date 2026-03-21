@@ -137,39 +137,47 @@ This weighting favors venues with tighter and better-supported top-of-book quote
 
 ## Quote Logic
 
-Quotes are generated symmetrically around the fair value.
+Quotes are generated around a reservation price derived from the fair value and adjusted for inventory.
 
-### Base quotes
+### Reservation price
 
 \[
-\text{bid} = \text{fair value} - \frac{\text{spread}}{2}
-\]
-\[
-\text{ask} = \text{fair value} + \frac{\text{spread}}{2}
+\text{reservation price} = \text{fair value} - (\text{inventory utilization} \times \text{inventory skew})
 \]
 
-### Spread adjustment
+This shifts quotes away from inventory that the strategy already holds, encouraging rebalancing.
 
-The spread is dynamically adjusted based on:
-- observed market spread across venues
-- cross-venue disagreement
-- system or data quality state
+### Spread construction
 
-### Inventory adjustment
+Quote width is based on:
+- a minimum half-spread floor
+- the observed market spread
+- an additional widening term proportional to cross-venue disagreement
 
-Quotes are skewed based on inventory:
+Single-venue and degraded states widen quotes further.
 
-- Long inventory → shift both bid and ask downward  
-- Short inventory → shift both bid and ask upward  
+### Market protection
 
-This reduces directional exposure by encouraging trades that rebalance inventory.
+Quotes are clamped to remain passive relative to the visible market and are suppressed entirely when:
+- no fair value is available
+- disagreement exceeds a hard threshold
+- the market is unhealthy
+- only a single low-confidence venue is available
 
-### Degraded conditions
+### Size construction
 
-Under degraded market conditions:
-- spreads are widened
-- quote sizes are reduced
-- quoting may be suppressed entirely if data is unreliable
+Quote size is determined from:
+- a base size budget
+- a liquidity cap based on trusted top-of-book size
+- market-health scaling
+- spread-quality scaling
+- disagreement scaling
+
+Inventory pressure is applied asymmetrically by reducing the side that would worsen the current position.
+
+### Inventory limits
+
+If inventory reaches a configured long or short limit, the strategy switches to one-sided quoting to encourage rebalancing.
 
 ---
 
