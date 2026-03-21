@@ -59,16 +59,27 @@ Venues are excluded if:
 - recently resynced
 - mid price deviates too far from the cross-venue median
 
+The median is used as a robust reference to reduce sensitivity to outliers.
+
 Recently resynchronized venues are temporarily excluded to avoid trusting data immediately after recovery from a potentially inconsistent state.
 
 ### Weighting
 
-Remaining venues are weighted using:
-- inverse spread (tighter markets are preferred)
-- top-of-book liquidity
-- a confidence penalty for lower-trust venues
+Remaining venues are weighted using a combination of spread and top-of-book support.
 
-In practice, Binance typically dominates the fair value due to tighter spreads and larger visible size. Coinbase contributes but does not dominate.
+Weights are computed as:
+
+weight = sqrt(min(best bid size, best ask size)) / spread_bps
+
+This formulation balances:
+- spread as a proxy for price quality (tighter markets are more informative)
+- top-of-book size as a proxy for immediate support at the quoted price
+
+The square-root term dampens the impact of unusually large displayed size, preventing a single venue from dominating purely due to size.
+
+Lower-confidence venues are further penalized multiplicatively to reduce their influence without fully excluding them.
+
+In practice, Binance typically dominates the fair value due to tighter spreads and larger visible size, while Coinbase contributes as a secondary signal.
 
 ### Cross-venue disagreement
 
@@ -79,9 +90,10 @@ It is used for:
 - spread widening
 - quote size reduction
 
-Cross-venue disagreement is not treated as book corruption. Instead, it is handled as a degradation of market quality.
+Cross-venue disagreement is not treated as book corruption. Instead, it is treated as a signal of market uncertainty or data inconsistency and is used to reduce quoting aggressiveness. 
 
 ---
+
 
 ## Market Health
 
@@ -89,7 +101,7 @@ Market health reflects usability of the data:
 
 - healthy
   - at least one high-confidence venue available
-  - disagreement within acceptable bounds
+  - and disagreement within acceptable bounds
 
 - degraded
   - elevated disagreement
@@ -104,6 +116,13 @@ Market health affects quoting behavior but is separate from venue confidence.
 ---
 
 ## Quote Construction
+
+The quoting logic is structured in layers:
+- hard suppression under unsafe conditions
+- reservation price adjustment for inventory
+- spread construction for price protection
+- size scaling for risk control
+- side asymmetry for inventory rebalancing
 
 ### Reservation price
 
@@ -122,13 +141,15 @@ Spread is determined by:
 - observed market spread
 - disagreement penalty
 
+Disagreement contributes additively to spread widening, increasing quote distance as venues diverge.
+
 Single-venue scenarios widen spreads.
 
 ---
 
 ### Size
 
-Quote size is determined heuristically as:
+Quote size is determined as:
 
 size = liquidity_cap × health_factor × spread_factor × disagreement_factor
 
@@ -147,6 +168,8 @@ Where:
   reduces size when venues diverge
 
 Using only the highest-confidence venue for liquidity prevents a weak venue with small size from collapsing quote size.
+
+Liquidity is referenced from the tightest high-confidence venue, ensuring that size is based on the most reliable and competitive book.
 
 ---
 
