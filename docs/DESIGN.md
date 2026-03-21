@@ -91,6 +91,8 @@ Because of this, the aggregate market can become temporarily crossed during disl
 
 Synthetic crossing is therefore treated as an uncertainty signal rather than an automatic condition for quote suppression.
 
+The aggregated top of book is not guaranteed to be executable on a single venue.
+
 ### Cross-venue disagreement
 
 Disagreement is measured in basis points.
