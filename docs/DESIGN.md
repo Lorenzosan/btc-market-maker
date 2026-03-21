@@ -81,6 +81,16 @@ Lower-confidence venues are further penalized multiplicatively to reduce their i
 
 In practice, Binance typically dominates the fair value due to tighter spreads and larger visible size, while Coinbase contributes as a secondary signal.
 
+### Aggregated Top of Book
+
+The aggregated best bid is defined as the maximum bid across all usable venues, and the aggregated best ask as the minimum ask.
+
+The resulting top of book is therefore synthetic and may combine prices from different venues.
+
+Because of this, the aggregate market can become temporarily crossed during dislocations (i.e. best bid exceeds best ask across venues). This does not indicate local book corruption on any individual venue, but rather reflects cross-venue price disagreement.
+
+Synthetic crossing is therefore treated as an uncertainty signal rather than an automatic condition for quote suppression.
+
 ### Cross-venue disagreement
 
 Disagreement is measured in basis points.
