@@ -98,7 +98,7 @@ The system is composed of the following components:
 
 ## Fair Value Methodology
 
-The fair value is computed as a weighted mid-price across exchanges.
+The fair value is computed from valid venue mid-prices.
 
 ### Per-exchange mid price
 
@@ -108,24 +108,30 @@ For each venue:
 \text{mid} = \frac{\text{best bid} + \text{best ask}}{2}
 \]
 
-### Aggregation
+### Venue filtering
 
-The consolidated fair value is computed as a weighted average of valid venues.
+A venue is excluded from fair-value computation if:
+- its data is stale
+- its order book is invalid or resynchronizing
+- its spread exceeds a configured threshold
+- its midpoint is an outlier relative to the cross-venue median
+- it has only recently recovered from a resync
 
-Weights are determined by:
-- top-of-book liquidity (size)
-- spread tightness
+### Weighting
 
-Venues are excluded if:
-- data is stale
-- the order book is resynchronizing
-- updates are inconsistent
+For each remaining venue, the weight is computed as:
+
+\[
+\text{weight} = \frac{\sqrt{\min(\text{bid size}, \text{ask size})}}{\text{spread}_{bps}}
+\]
+
+Top-of-book size is used as a local measure of support at the current best price, while spread is used as a measure of midpoint quality. The square-root term dampens the influence of unusually large displayed size.
+
+Lower-confidence venues are further penalized multiplicatively.
 
 ### Rationale
 
-- Transparent and interpretable  
-- Stable under normal market conditions  
-- Avoids overfitting and reliance on noisy signals
+This weighting favors venues with tighter and better-supported top-of-book quotes, while reducing sensitivity to fragile quotes, wide markets, and recently unstable venue states.
 
 ---
 
