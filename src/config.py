@@ -78,7 +78,7 @@ QUOTE_SUPPRESS_SINGLE_LOW_CONFIDENCE = True
 
 # Cross-venue synthetic top-of-book can appear crossed because venues are
 # asynchronous or materially disagree. This is not treated as local corruption.
-QUOTE_SUPPRESS_CROSSED_MARKET = True
+QUOTE_SUPPRESS_CROSSED_MARKET = False
 
 
 # ============================================
