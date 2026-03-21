@@ -67,6 +67,9 @@ FAIR_VALUE_LOW_CONFIDENCE_PENALTY = 0.35
 # Market health and suppression
 # ============================================
 
+# Optional: controls whether quote debug internals are exposed in verbose output.
+QUOTE_INCLUDE_DEBUG_FIELDS = True
+
 # If cross-venue disagreement exceeds this threshold, quotes are suppressed.
 QUOTE_SUPPRESS_MAX_DISAGREEMENT_BPS = 10.0
 

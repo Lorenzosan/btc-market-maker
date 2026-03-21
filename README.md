@@ -1,7 +1,10 @@
 # BTC Market Maker
 
 ## Overview
-This project implements a lightweight market-making service for BTC-USD. It ingests live order book data from multiple exchanges (Binance and Coinbase), maintains local books, computes a consolidated fair value, and outputs quote recommendations in real time.
+
+This project is an advisory quote engine built on public BTC-USD market data, ingesting live data from multiple exchanges (Bitcoing and Coinbase).
+
+It is not intended to predict price or optimize execution. The goal is to maintain usable local books, compute a defensible consolidated fair value, and generate conservative quote recommendations that degrade safely when data becomes stale, inconsistent, or incomplete.
 
 ---
 
@@ -18,7 +21,7 @@ This project implements a lightweight market-making service for BTC-USD. It inge
 
 ## Requirements
 
-- Python 3.13 (tested)
+- Python 3.11+ (tested on 3.13)
 - Internet connection for live WebSocket feeds
 
 ---
@@ -153,6 +156,8 @@ This weighting favors venues with tighter and better-supported top-of-book quote
 
 ## Quote Logic
 
+Quote size is intentionally low-variance and controlled by conservative heuristics. Size is capped using trusted visible top-of-book liquidity and adjusted through bounded factors based on market health, spread, and cross-venue disagreement. This design ensures stable sizing and avoids overreacting to noisy or transient book updates.
+
 Quotes are generated around a reservation price derived from the fair value and adjusted for inventory.
 
 ### Reservation price
@@ -218,10 +223,11 @@ The system explicitly handles the following failure modes:
 
 ## Assumptions
 
-- inventory is externally provided and static during a run  
-- the system produces advisory quotes only and does not place orders  
-- only public market data is used  
-- latency is not explicitly optimized  
+- Inventory is externally provided at startup and remains fixed during a run.
+- Quotes are advisory outputs only; no orders are sent.
+- Only public spot market data is used.
+- The objective is safe and explainable quote generation, not execution optimization or alpha generation.
+- Visible top-of-book size is used only as a heuristic input to weighting and sizing, not as a full liquidity model.
 
 ---
 

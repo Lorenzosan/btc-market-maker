@@ -5,7 +5,7 @@ import argparse
 from src.config import INITIAL_INVENTORY, QUOTE_BASE_SIZE, OUTPUT_VERBOSITY
 from src.ingestion.binance import BinanceConnector
 from src.ingestion.coinbase import CoinbaseConnector
-from src.output.printer import print_books
+from src.output.printer import run_output_loop
 from src.utils.logging import setup_logging
 
 
@@ -55,7 +55,7 @@ async def main() -> None:
         asyncio.create_task(binance.run(queue)),
         asyncio.create_task(coinbase.run(queue)),
         asyncio.create_task(
-            print_books(
+            run_output_loop(
                 queue,
                 inventory=args.inventory,
                 base_size=args.base_size,

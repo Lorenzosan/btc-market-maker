@@ -18,7 +18,6 @@ logger = logging.getLogger(__name__)
 
 
 def format_top(top: dict) -> str:
-    # Compact one-venue rendering for terminal output.
     best_bid = top["best_bid"]
     best_ask = top["best_ask"]
 
@@ -31,47 +30,58 @@ def format_top(top: dict) -> str:
 
 
 def format_quote_side(price: float | None, size: float | None) -> str:
-    # Compact rendering for one quote side.
     if price is None or size is None:
         return "NA"
     return f"{price:.2f} x {size:.6f}"
 
 
 def build_event_payload(event, top: dict, fv, quote, verbosity: int) -> dict:
-    # Common payload shared by verbose output modes.
     payload = {
-        "source": event.source,
+        "event_source": event.source,
         "symbol": event.symbol,
         "exchange_ts": event.exchange_ts,
-        "best_bid": top["best_bid"],
-        "best_ask": top["best_ask"],
-        "mid": top["mid"],
-        "spread": top["spread"],
-        "initialized": top["initialized"],
-        "valid": top["valid"],
-        "last_sequence": top["last_sequence"],
-        "status": top["status"],
-        "fair_value": fv.fair_value,
-        "fair_value_status": fv.status,
-        "fair_value_reference_mid": fv.reference_mid,
-        "fair_value_best_bid": fv.best_bid,
-        "fair_value_best_ask": fv.best_ask,
-        "fair_value_market_spread": fv.market_spread,
-        "fair_value_disagreement_bps": fv.disagreement_bps,
-        "reservation_price": quote.reservation_price,
-        "quote_bid_price": quote.bid_price,
-        "quote_bid_size": quote.bid_size,
-        "quote_ask_price": quote.ask_price,
-        "quote_ask_size": quote.ask_size,
-        "quote_inventory": quote.inventory,
-        "quote_status": quote.status,
-        "last_received_ts": top["last_received_ts"],
-        "age_ms": top["age_ms"],
-        "is_stale": top["is_stale"],
+        "observed_ts": utc_now_iso(),
+        "book": {
+            "best_bid": top["best_bid"],
+            "best_ask": top["best_ask"],
+            "mid": top["mid"],
+            "spread": top["spread"],
+            "initialized": top["initialized"],
+            "valid": top["valid"],
+            "status": top["status"],
+            "last_sequence": top["last_sequence"],
+            "last_received_ts": top["last_received_ts"],
+            "age_ms": top["age_ms"],
+            "is_stale": top["is_stale"],
+        },
+        "fair_value": {
+            "value": fv.fair_value,
+            "status": fv.status,
+            "reference_mid": fv.reference_mid,
+            "best_bid": fv.best_bid,
+            "best_ask": fv.best_ask,
+            "market_spread": fv.market_spread,
+            "disagreement_bps": fv.disagreement_bps,
+        },
+        "quote": {
+            "reservation_price": quote.reservation_price,
+            "bid_price": quote.bid_price,
+            "bid_size": quote.bid_size,
+            "ask_price": quote.ask_price,
+            "ask_size": quote.ask_size,
+            "inventory": quote.inventory,
+            "status": quote.status,
+        },
     }
 
+    if hasattr(fv, "market_health"):
+        payload["fair_value"]["market_health"] = fv.market_health
+
+    if hasattr(fv, "confidence_profile"):
+        payload["fair_value"]["confidence_profile"] = fv.confidence_profile
+
     if verbosity >= 2:
-        payload["fair_value_inputs"] = [
+        payload["fair_value"]["inputs"] = [
             {
                 "source": q.source,
                 "mid": round(q.mid, 2),
@@ -82,44 +92,68 @@ def build_event_payload(event, top: dict, fv, quote, verbosity: int) -> dict:
                 "top_size": round(q.top_size, 6),
                 "deviation_bps": round(q.deviation_bps, 4),
                 "weight": round(q.weight, 6),
+                "confidence": getattr(q, "confidence", None),
             }
             for q in fv.inputs
         ]
 
+        excluded_inputs = getattr(fv, "excluded_inputs", [])
+        payload["fair_value"]["excluded_inputs"] = [
+            {
+                "source": q.source,
+                "mid": round(q.mid, 2) if q.mid is not None else None,
+                "spread_bps": round(q.spread_bps, 4) if q.spread_bps is not None else None,
+                "deviation_bps": round(q.deviation_bps, 4) if q.deviation_bps is not None else None,
+                "confidence": getattr(q, "confidence", None),
+                "excluded_reason": getattr(q, "excluded_reason", "unknown"),
+            }
+            for q in excluded_inputs
+        ]
+
+        payload["quote"]["debug"] = {
+            "raw_size": quote.raw_size,
+            "liquidity_cap": quote.liquidity_cap,
+            "health_factor": quote.health_factor,
+            "spread_factor": quote.spread_factor,
+            "disagreement_factor": quote.disagreement_factor,
+            "bid_size_factor": quote.bid_size_factor,
+            "ask_size_factor": quote.ask_size_factor,
+            "half_spread": quote.half_spread,
+        }
+
     return payload
 
 
-async def print_books(queue: asyncio.Queue,
-                      inventory=INITIAL_INVENTORY,
-                      base_size=QUOTE_BASE_SIZE,
-                      verbosity=OUTPUT_VERBOSITY):
-    # Single manager instance that tracks one local book per source.
+async def run_output_loop(
+    queue: asyncio.Queue,
+    inventory=INITIAL_INVENTORY,
+    base_size=QUOTE_BASE_SIZE,
+    verbosity=OUTPUT_VERBOSITY,
+):
     manager = OrderBookManager()
-
-    # Fair-value engine built on top of maintained venue books.
     fair_value_engine = FairValueEngine()
-
-    # Quote engine built on top of fair value.
-    quote_engine = QuoteEngine(inventory=inventory,base_size=base_size,)
+    quote_engine = QuoteEngine(
+        inventory=inventory,
+        base_size=base_size,
+    )
 
     async def consumer() -> None:
-        # Consume and apply events as fast as they arrive.
         while True:
             event = await queue.get()
-            manager.apply_event(event)
-            manager.refresh_staleness(VENUE_STALE_AFTER_SECONDS)
+            try:
+                manager.apply_event(event)
+                manager.refresh_staleness(VENUE_STALE_AFTER_SECONDS)
 
-            if verbosity >= 1:
-                top = manager.top_of_book(event.source)
-                fv = fair_value_engine.compute(manager)
-                quote = quote_engine.compute(fv)
-                payload = build_event_payload(event, top, fv, quote, verbosity)
-                logger.info(json.dumps(payload, separators=(",", ":")))
-
-            queue.task_done()
+                if verbosity >= 1:
+                    top = manager.top_of_book(event.source)
+                    fv = fair_value_engine.compute(manager)
+                    quote = quote_engine.compute(fv)
+                    payload = build_event_payload(event, top, fv, quote, verbosity)
+                    logger.info(json.dumps(payload, separators=(",", ":")))
+            finally:
+                queue.task_done()
 
     async def reporter() -> None:
-        # Emit one compact consolidated snapshot periodically in level-0 mode.
         if verbosity != 0:
             return
 
@@ -144,9 +178,14 @@ async def print_books(queue: asyncio.Queue,
             )
 
             print(
-                f"{utc_now_iso()} | bin={binance_str} | cb={coinbase_str} | "
-                f"fv={fv_str} | disc={disagreement_str} | "
-                f"bid={bid_str} | ask={ask_str} | status={quote.status}",
+                f"{utc_now_iso()} | "
+                f"bin={binance_str} | "
+                f"cb={coinbase_str} | "
+                f"fv={fv_str} | "
+                f"disc={disagreement_str} | "
+                f"bid={bid_str} | "
+                f"ask={ask_str} | "
+                f"status={quote.status}",
                 flush=True,
             )
 
@@ -154,3 +193,4 @@ async def print_books(queue: asyncio.Queue,
         consumer(),
         reporter(),
     )
+

@@ -97,21 +97,23 @@ Cross-venue disagreement is not treated as book corruption. Instead, it is treat
 
 ## Market Health
 
-Market health reflects usability of the data:
+Market health reflects the usability and reliability of the aggregated market data.
 
-- healthy
-  - at least one high-confidence venue available
-  - and disagreement within acceptable bounds
+- healthy  
+  - at least one high-confidence venue is active  
+  - and cross-venue disagreement is within configured thresholds  
 
-- degraded
-  - elevated disagreement
-  - or only a single venue available
+- degraded  
+  - disagreement is elevated but below hard suppression thresholds  
+  - or only a single venue is available  
 
-- unhealthy
-  - no usable venues
-  - or only low-confidence venue
+- unhealthy  
+  - no usable venues are available  
+  - or only low-confidence venues remain  
 
-Market health affects quoting behavior but is separate from venue confidence.
+Market health influences quoting behavior by scaling quote size and determining whether quoting should be degraded or suppressed, but it is distinct from per-venue confidence.
+
+The distinction between high-confidence and low-confidence venues is an implementation-level trust decision based on local reconstruction and integrity guarantees in this codebase. It is not a claim about absolute venue quality.
 
 ---
 
@@ -156,20 +158,20 @@ size = liquidity_cap × health_factor × spread_factor × disagreement_factor
 Where:
 
 - liquidity_cap  
-  based on top-of-book size of the highest-confidence active venue
+  capped using trusted visible top-of-book liquidity across high-confidence venues
 
 - health_factor  
-  reduces size in degraded conditions
+  reduces size in degraded or unhealthy market states
 
 - spread_factor  
-  reduces size when spreads are wide
+  reduces size when the trusted venue spread is wide
 
 - disagreement_factor  
-  reduces size when venues diverge
+  reduces size as cross-venue disagreement increases
 
-Using only the highest-confidence venue for liquidity prevents a weak venue with small size from collapsing quote size.
+The liquidity cap uses high-confidence venues only and takes a conservative reference from their visible top-of-book size. This prevents unreliable or low-confidence inputs from distorting quote size while ensuring sizing remains feasible relative to observed liquidity.
 
-Liquidity is referenced from the tightest high-confidence venue, ensuring that size is based on the most reliable and competitive book.
+Quote sizing is intentionally conservative and only moderately state-dependent. The engine expresses most uncertainty through spread widening and quote suppression, while size changes gradually to avoid reacting to noisy or transient top-of-book updates.
 
 ---
 
