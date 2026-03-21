@@ -4,8 +4,10 @@ import logging
 
 from src.config import (
     OUTPUT_INTERVAL_SECONDS,
-    OUTPUT_VERBOSITY,
     VENUE_STALE_AFTER_SECONDS,
+    INITIAL_INVENTORY,
+    QUOTE_BASE_SIZE,
+    OUTPUT_VERBOSITY,
 )
 from src.fair_value.fair_value import FairValueEngine
 from src.orderbook.manager import OrderBookManager
@@ -87,7 +89,10 @@ def build_event_payload(event, top: dict, fv, quote, verbosity: int) -> dict:
     return payload
 
 
-async def print_books(queue: asyncio.Queue):
+async def print_books(queue: asyncio.Queue,
+                      inventory=INITIAL_INVENTORY,
+                      base_size=QUOTE_BASE_SIZE,
+                      verbosity=OUTPUT_VERBOSITY):
     # Single manager instance that tracks one local book per source.
     manager = OrderBookManager()
 
@@ -95,7 +100,7 @@ async def print_books(queue: asyncio.Queue):
     fair_value_engine = FairValueEngine()
 
     # Quote engine built on top of fair value.
-    quote_engine = QuoteEngine()
+    quote_engine = QuoteEngine(inventory=inventory,base_size=base_size,)
 
     async def consumer() -> None:
         # Consume and apply events as fast as they arrive.
@@ -104,18 +109,18 @@ async def print_books(queue: asyncio.Queue):
             manager.apply_event(event)
             manager.refresh_staleness(VENUE_STALE_AFTER_SECONDS)
 
-            if OUTPUT_VERBOSITY >= 1:
+            if verbosity >= 1:
                 top = manager.top_of_book(event.source)
                 fv = fair_value_engine.compute(manager)
                 quote = quote_engine.compute(fv)
-                payload = build_event_payload(event, top, fv, quote, OUTPUT_VERBOSITY)
+                payload = build_event_payload(event, top, fv, quote, verbosity)
                 logger.info(json.dumps(payload, separators=(",", ":")))
 
             queue.task_done()
 
     async def reporter() -> None:
         # Emit one compact consolidated snapshot periodically in level-0 mode.
-        if OUTPUT_VERBOSITY != 0:
+        if verbosity != 0:
             return
 
         while True:

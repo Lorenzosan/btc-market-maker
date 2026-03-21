@@ -43,7 +43,23 @@ python main.py
 Optional parameters:
 
 ```bash
-python main.py --inventory 0.5
+python main.py [options]
+```
+
+Available options are:
+
+- `--inventory`: Initial inventory used for reservation-price skew and inventory-aware sizing
+- `--base_size`: Base quote size before applying liquidity and risk scaling.
+- `--log_level {INFO,DEBUG}`: Controls logging verbosity for internal diagnostics.
+- `--verbosity {0,1,2}`: Controls output detail level:
+  - 0: periodic compact summary
+  - 1: per-event concise output
+  - 2: per-event detailed output
+
+Example:
+
+```bash
+python main.py --inventory 0.5 --log-level DEBUG --verbosity 1
 ```
 
 ---
