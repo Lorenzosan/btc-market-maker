@@ -16,6 +16,14 @@ from src.utils.time import utc_now_iso
 
 logger = logging.getLogger(__name__)
 
+def fmt_size(size: float) -> str:
+    if size is None:
+        return "NA"
+    if size <= 0:
+        return "0"
+    if size < 0.0001:
+        return "<0.0001"
+    return f"{size:.4f}"
 
 def format_top(top: dict) -> str:
     best_bid = top["best_bid"]
@@ -26,13 +34,14 @@ def format_top(top: dict) -> str:
 
     bid_px, bid_sz = best_bid
     ask_px, ask_sz = best_ask
-    return f"{bid_px:.2f}({bid_sz:.6f})/{ask_px:.2f}({ask_sz:.6f})"
+    return f"{bid_px:.2f}({fmt_size(bid_sz)})/{ask_px:.2f}({fmt_size(ask_sz)})"
+    #return f"{bid_px:.2f}({bid_sz:.4f})/{ask_px:.2f}({ask_sz:.4f})"
 
 
 def format_quote_side(price: float | None, size: float | None) -> str:
     if price is None or size is None:
         return "NA"
-    return f"{price:.2f} x {size:.6f}"
+    return f"{price:.2f} x {size:.4f}"
 
 
 def build_event_payload(event, top: dict, fv, quote, verbosity: int) -> dict:
@@ -161,31 +170,32 @@ async def run_output_loop(
             await asyncio.sleep(OUTPUT_INTERVAL_SECONDS)
             manager.refresh_staleness(VENUE_STALE_AFTER_SECONDS)
 
-            binance_top = manager.top_of_book("binance")
-            coinbase_top = manager.top_of_book("coinbase")
+            bn_top = manager.top_of_book("binance")
+            cb_top = manager.top_of_book("coinbase")
+
             fv = fair_value_engine.compute(manager)
             quote = quote_engine.compute(fv)
 
-            binance_str = format_top(binance_top)
-            coinbase_str = format_top(coinbase_top)
+            bn_str = format_top(bn_top)
+            cb_str = format_top(cb_top)
+
             fv_str = "NA" if fv.fair_value is None else f"{fv.fair_value:.2f}"
             bid_str = format_quote_side(quote.bid_price, quote.bid_size)
             ask_str = format_quote_side(quote.ask_price, quote.ask_size)
-            disagreement_str = (
-                "NA"
-                if fv.disagreement_bps is None
-                else f"{fv.disagreement_bps:.3f}bps"
-            )
+
+            disc_str = "NA"
+            if fv.disagreement_bps is not None and fv.active_source_count >= 2:
+                disc_str = f"{fv.disagreement_bps:.3f}bps"
 
             print(
                 f"{utc_now_iso()} | "
-                f"bin={binance_str} | "
-                f"cb={coinbase_str} | "
+                f"bn={bn_str} | "
+                f"cb={cb_str} | "
                 f"fv={fv_str} | "
-                f"disc={disagreement_str} | "
+                f"disc={disc_str} | "
                 f"bid={bid_str} | "
                 f"ask={ask_str} | "
-                f"status={quote.status}",
+                f"sts={quote.status}",
                 flush=True,
             )
 
@@ -193,4 +203,3 @@ async def run_output_loop(
         consumer(),
         reporter(),
     )
-

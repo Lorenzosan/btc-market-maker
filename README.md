@@ -81,16 +81,15 @@ pytest
 The system emits updates with a target period of 250ms. An example of output is the following:
 
 ```
-2026-03-20T16:02:56.006781+00:00 | bin=69938.50(2.264810)/69938.51(0.610710) | cb=69926.84(0.083681)/69926.85(0.000016) | fv=69938.45 | disc=1.667bps | bid=69936.95 x 0.007900 | ask=69939.95 x 0.007900 | status=active_two_sided
+2026-03-22T16:25:00.898584+00:00 | bn=68739.80(0.2010)/68739.81(2.4191) | cb=68736.15(0.0604)/68736.16(0.3767) | fv=68739.22 | disc=0.531bps | bid=68737.72 x 0.0093 | ask=68740.72 x 0.0093 | sts=active_two_sided
 ```
 
-Field description:
-- bin, cb: best bid/ask and sizes per venue
-- fv: fair value
-- disc: cross-venue disagreement (basis points)
-- bid, ask: recommended quotes and sizes
-- status: quoting state
-
+Fields:
+- `bn`, `cb`: top-of-book per venue, formatted as `bid(size)/ask(size)`
+- `fv`: consolidated fair value
+- `disc`: cross-venue mid-price disagreement in basis points (`NA` if fewer than two active venues)
+- `bid`, `ask`: recommended quote price and size
+- `sts`: quoting status (e.g. inactive, one-sided, two-sided)
 
 ---
 

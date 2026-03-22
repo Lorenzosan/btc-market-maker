@@ -5,7 +5,7 @@ import sys
 def setup_logging(level: str = "INFO", logfile: str | None = None) -> None:
     numeric_level = getattr(logging, level.upper(), logging.INFO)
 
-    handlers = [logging.StreamHandler(sys.stdout)]
+    handlers = [logging.StreamHandler(sys.stderr)]
 
     if logfile is not None:
         handlers.append(logging.FileHandler(logfile))
