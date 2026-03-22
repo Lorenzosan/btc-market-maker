@@ -62,7 +62,7 @@ Available options are:
 Example:
 
 ```bash
-python main.py --inventory 0.5 --log_level DEBUG --verbosity 1
+python main.py --inventory 0.5 --log_level INFO --verbosity 1
 ```
 
 ---
