@@ -15,3 +15,6 @@ def setup_logging(level: str = "INFO", logfile: str | None = None) -> None:
         format="%(asctime)s %(levelname)s %(message)s",
         handlers=handlers,
     )
+
+    logging.getLogger("websockets").setLevel(logging.INFO)
+    logging.getLogger("asyncio").setLevel(logging.INFO)

@@ -2,7 +2,7 @@
 
 ## Overview
 
-This project is an advisory quote engine built on public BTC-USD market data, ingesting live data from multiple exchanges (Bitcoing and Coinbase).
+This project is an advisory quote engine built on public BTC-USD market data, ingesting live data from multiple exchanges (Binance and Coinbase).
 
 It is not intended to predict price or optimize execution. The goal is to maintain usable local books, compute a defensible consolidated fair value, and generate conservative quote recommendations that degrade safely when data becomes stale, inconsistent, or incomplete.
 
@@ -62,7 +62,7 @@ Available options are:
 Example:
 
 ```bash
-python main.py --inventory 0.5 --log-level DEBUG --verbosity 1
+python main.py --inventory 0.5 --log_level DEBUG --verbosity 1
 ```
 
 ---
@@ -78,7 +78,7 @@ pytest
 
 ## Output
 
-The system emits updates with a target period of 250ms. An example of output is the following:
+The system emits updates with a target period of 250ms. An example of output (verbosity level 0) is the following:
 
 ```
 2026-03-22T16:25:00.898584+00:00 | bn=68739.80(0.2010)/68739.81(2.4191) | cb=68736.15(0.0604)/68736.16(0.3767) | fv=68739.22 | disc=0.531bps | bid=68737.72 x 0.0093 | ask=68740.72 x 0.0093 | sts=active_two_sided
@@ -87,9 +87,36 @@ The system emits updates with a target period of 250ms. An example of output is 
 Fields:
 - `bn`, `cb`: top-of-book per venue, formatted as `bid(size)/ask(size)`
 - `fv`: consolidated fair value
-- `disc`: cross-venue mid-price disagreement in basis points (`NA` if fewer than two active venues)
+- `disc`: cross-venue mid-price disagreement in basis points (displayed as `NA` if fewer than two filtered venues; internally defined as 0 in that case)
 - `bid`, `ask`: recommended quote price and size
 - `sts`: quoting status (e.g. inactive, one-sided, two-sided)
+
+### Verbosity levels
+
+The system supports three output modes:
+
+- **verbosity = 0 (summary mode)**  
+  Periodic compact output printed to stdout at a fixed interval.  
+  Includes:
+  - per-venue top-of-book
+  - fair value
+  - disagreement
+  - final quotes and status  
+
+- **verbosity = 1 (event mode)**  
+  Emits a JSON payload for each market event.  
+  Includes:
+  - top-of-book state
+  - `cross_venue_best_spread` is the synthetic spread defined as min(best ask) − max(best bid) across filtered venues.
+  - fair value (including cross_venue_best_spread, disagreement, and market health)
+  - final quotes
+
+- **verbosity = 2 (debug mode)**  
+  Extends verbosity 1 with detailed diagnostics.  
+  Includes:
+  - per-venue inputs to fair value (weights, spreads, sizes)
+  - excluded venues and reasons
+  - internal quote construction factors
 
 ---
 
@@ -104,7 +131,7 @@ The system is composed of the following components:
   Maintains local order books per venue using sequence-aware updates and resynchronization logic.
 
 - **Fair Value Engine**
-  Computes a consolidated BTC price from valid venues, excluding stale or unreliable data.
+  Computes a consolidated BTC price from filtered venues, excluding stale or unreliable data.
 
 - **Quoting Engine**
   Generates bid/ask quotes based on fair value, inventory, and market conditions.
@@ -116,7 +143,7 @@ The system is composed of the following components:
 
 ## Fair Value Methodology
 
-The fair value is computed from valid venue mid-prices.
+The fair value is computed as a weighted average of filtered venue mid-prices.
 
 ### Per-exchange mid price
 
@@ -151,6 +178,8 @@ Lower-confidence venues are further penalized multiplicatively.
 
 This weighting favors venues with tighter and better-supported top-of-book quotes, while reducing sensitivity to fragile quotes, wide markets, and recently unstable venue states.
 
+The synthetic cross-venue best spread is computed for diagnostics but is not used directly in fair value or quote construction.
+
 ---
 
 ## Quote Logic
@@ -171,7 +200,7 @@ This shifts quotes away from inventory that the strategy already holds, encourag
 
 Quote width is based on:
 - a minimum half-spread floor
-- the observed market spread
+- the per-venue observed spread from trusted venues
 - an additional widening term proportional to cross-venue disagreement
 
 Single-venue and degraded states widen quotes further.
@@ -180,7 +209,7 @@ Single-venue and degraded states widen quotes further.
 
 Quotes are clamped to remain passive relative to the visible market and are suppressed entirely when:
 - no fair value is available
-- disagreement exceeds a hard threshold
+- disagreement exceeds a configured suppression threshold
 - the market is unhealthy
 - only a single low-confidence venue is available
 
@@ -208,7 +237,7 @@ The system explicitly handles the following failure modes:
 - WebSocket disconnections  
 - Stale market data  
 - Order book desynchronization  
-- Significant cross-exchange divergence  
+- Significant cross-venue disagreement  
 
 ### Mitigations
 
@@ -252,5 +281,12 @@ Potential production extensions include:
 - more robust recovery during prolonged venue degradation  
 - integrated position and risk management  
 - latency tracking and latency-aware fair value adjustments  
+
+Model and pricing improvements may include:
+
+- dynamic venue trust scoring  
+- lightweight fair value smoothing  
+- incorporation of external reference prices  
+- quote quality evaluation (e.g. markouts)
 
 ---

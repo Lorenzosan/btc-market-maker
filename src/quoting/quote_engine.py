@@ -95,8 +95,8 @@ class QuoteEngine:
 
         if (
             QUOTE_SUPPRESS_CROSSED_MARKET
-            and fair_value.market_spread is not None
-            and fair_value.market_spread <= 0
+            and fair_value.cross_venue_best_spread is not None
+            and fair_value.cross_venue_best_spread <= 0
         ):
             return "inactive_crossed_market"
 
@@ -107,8 +107,8 @@ class QuoteEngine:
 
     def _status_half_spread(self, fair_value: FairValueResult) -> float:
         market_half_spread = 0.0
-        if fair_value.market_spread is not None:
-            market_half_spread = max(fair_value.market_spread / 2.0, 0.0)
+        if fair_value.cross_venue_best_spread is not None:
+            market_half_spread = max(fair_value.cross_venue_best_spread / 2.0, 0.0)
 
         disagreement_component = 0.0
         if fair_value.disagreement_bps is not None:
@@ -252,7 +252,7 @@ class QuoteEngine:
             fallback_half_spread = max(
                 half_spread,
                 self.min_half_spread,
-                (fair_value.market_spread or 0.0) + QUOTE_MARKET_EDGE_BUFFER,
+                (fair_value.cross_venue_best_spread or 0.0) + QUOTE_MARKET_EDGE_BUFFER,
             )
             raw_bid_price = fair_value.fair_value - fallback_half_spread
             raw_ask_price = fair_value.fair_value + fallback_half_spread

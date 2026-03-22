@@ -42,7 +42,7 @@ class FairValueResult:
     reference_mid: float | None
     best_bid: float | None
     best_ask: float | None
-    market_spread: float | None
+    cross_venue_best_spread: float | None
     disagreement_bps: float | None
     market_health: str
     confidence_profile: str
@@ -241,7 +241,7 @@ class FairValueEngine:
                 reference_mid=None,
                 best_bid=None,
                 best_ask=None,
-                market_spread=None,
+                cross_venue_best_spread=None,
                 disagreement_bps=None,
                 market_health="unhealthy",
                 confidence_profile="none",
@@ -260,7 +260,7 @@ class FairValueEngine:
                 reference_mid=round(reference_mid, 2) if reference_mid is not None else None,
                 best_bid=None,
                 best_ask=None,
-                market_spread=None,
+                cross_venue_best_spread=None,
                 disagreement_bps=None,
                 market_health="unhealthy",
                 confidence_profile="none",
@@ -278,7 +278,7 @@ class FairValueEngine:
                 reference_mid=round(reference_mid, 2) if reference_mid is not None else None,
                 best_bid=None,
                 best_ask=None,
-                market_spread=None,
+                cross_venue_best_spread=None,
                 disagreement_bps=None,
                 market_health="unhealthy",
                 confidence_profile="none",
@@ -289,7 +289,7 @@ class FairValueEngine:
         fair_value = sum(q.mid * q.weight for q in filtered_quotes) / total_weight
         best_bid = max(q.bid for q in filtered_quotes)
         best_ask = min(q.ask for q in filtered_quotes)
-        market_spread = best_ask - best_bid
+        cross_venue_best_spread = best_ask - best_bid
 
         mids = [q.mid for q in filtered_quotes]
         disagreement_bps = ((max(mids) - min(mids)) / fair_value) * 10000.0 if len(mids) > 1 else 0.0
@@ -316,7 +316,7 @@ class FairValueEngine:
             reference_mid=round(reference_mid, 2) if reference_mid is not None else None,
             best_bid=round(best_bid, 2),
             best_ask=round(best_ask, 2),
-            market_spread=round(market_spread, 2),
+            cross_venue_best_spread=round(cross_venue_best_spread, 2),
             disagreement_bps=round(disagreement_bps, 3),
             market_health=market_health,
             confidence_profile=confidence_profile,

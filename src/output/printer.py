@@ -16,6 +16,7 @@ from src.utils.time import utc_now_iso
 
 logger = logging.getLogger(__name__)
 
+
 def fmt_size(size: float) -> str:
     if size is None:
         return "NA"
@@ -24,6 +25,7 @@ def fmt_size(size: float) -> str:
     if size < 0.0001:
         return "<0.0001"
     return f"{size:.4f}"
+
 
 def format_top(top: dict) -> str:
     best_bid = top["best_bid"]
@@ -35,13 +37,12 @@ def format_top(top: dict) -> str:
     bid_px, bid_sz = best_bid
     ask_px, ask_sz = best_ask
     return f"{bid_px:.2f}({fmt_size(bid_sz)})/{ask_px:.2f}({fmt_size(ask_sz)})"
-    #return f"{bid_px:.2f}({bid_sz:.4f})/{ask_px:.2f}({ask_sz:.4f})"
 
 
 def format_quote_side(price: float | None, size: float | None) -> str:
     if price is None or size is None:
         return "NA"
-    return f"{price:.2f} x {size:.4f}"
+    return f"{price:.2f} x {fmt_size(size)}"
 
 
 def build_event_payload(event, top: dict, fv, quote, verbosity: int) -> dict:
@@ -69,7 +70,7 @@ def build_event_payload(event, top: dict, fv, quote, verbosity: int) -> dict:
             "reference_mid": fv.reference_mid,
             "best_bid": fv.best_bid,
             "best_ask": fv.best_ask,
-            "market_spread": fv.market_spread,
+            "cross_venue_best_spread": fv.cross_venue_best_spread,
             "disagreement_bps": fv.disagreement_bps,
         },
         "quote": {
@@ -133,6 +134,45 @@ def build_event_payload(event, top: dict, fv, quote, verbosity: int) -> dict:
     return payload
 
 
+def build_summary_payload(payload: dict) -> dict:
+    fair_value = payload["fair_value"]
+    quote = payload["quote"]
+    book = payload["book"]
+
+    return {
+        "event_source": payload["event_source"],
+        "symbol": payload["symbol"],
+        "exchange_ts": payload["exchange_ts"],
+        "observed_ts": payload["observed_ts"],
+        "book": {
+            "best_bid": book["best_bid"],
+            "best_ask": book["best_ask"],
+            "status": book["status"],
+            "is_stale": book["is_stale"],
+        },
+        "fair_value": {
+            "value": fair_value["value"],
+            "status": fair_value["status"],
+            "reference_mid": fair_value["reference_mid"],
+            "best_bid": fair_value["best_bid"],
+            "best_ask": fair_value["best_ask"],
+            "cross_venue_best_spread": fair_value["cross_venue_best_spread"],
+            "disagreement_bps": fair_value["disagreement_bps"],
+            "market_health": fair_value.get("market_health"),
+            "confidence_profile": fair_value.get("confidence_profile"),
+        },
+        "quote": {
+            "reservation_price": quote["reservation_price"],
+            "bid_price": quote["bid_price"],
+            "bid_size": quote["bid_size"],
+            "ask_price": quote["ask_price"],
+            "ask_size": quote["ask_size"],
+            "inventory": quote["inventory"],
+            "status": quote["status"],
+        },
+    }
+
+
 async def run_output_loop(
     queue: asyncio.Queue,
     inventory=INITIAL_INVENTORY,
@@ -158,7 +198,16 @@ async def run_output_loop(
                     fv = fair_value_engine.compute(manager)
                     quote = quote_engine.compute(fv)
                     payload = build_event_payload(event, top, fv, quote, verbosity)
-                    logger.info(json.dumps(payload, separators=(",", ":")))
+
+                    if verbosity == 1:
+                        logger.info(
+                            json.dumps(
+                                build_summary_payload(payload),
+                                separators=(",", ":"),
+                            )
+                        )
+                    else:
+                        logger.info(json.dumps(payload, separators=(",", ":")))
             finally:
                 queue.task_done()
 

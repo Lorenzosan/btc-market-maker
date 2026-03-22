@@ -55,7 +55,7 @@ In particular, a negative synthetic spread (best bid greater than best ask acros
 
 Venues are excluded if:
 - spread is too wide
-- data is stale
+- data is stale or invalid
 - recently resynced
 - mid price deviates too far from the cross-venue median
 
@@ -79,30 +79,53 @@ The square-root term dampens the impact of unusually large displayed size, preve
 
 Lower-confidence venues are further penalized multiplicatively to reduce their influence without fully excluding them.
 
-In practice, Binance typically dominates the fair value due to tighter spreads and larger visible size, while Coinbase contributes as a secondary signal.
+In practice, higher-confidence venues with tighter spreads and larger visible size tend to dominate the fair value.
 
 ### Aggregated Top of Book
 
-The aggregated best bid is defined as the maximum bid across all usable venues, and the aggregated best ask as the minimum ask.
+The aggregated best bid is defined as the maximum bid across all filtered venues, and the aggregated best ask as the minimum ask.
 
 The resulting top of book is therefore synthetic and may combine prices from different venues.
 
 Because of this, the aggregate market can become temporarily crossed during dislocations (i.e. best bid exceeds best ask across venues). This does not indicate local book corruption on any individual venue, but rather reflects cross-venue price disagreement.
 
-Synthetic crossing is therefore treated as an uncertainty signal rather than an automatic condition for quote suppression.
+Synthetic crossing is treated as an uncertainty signal rather than a direct trading signal. It does not trigger quote suppression by itself, but contributes indirectly through disagreement-based spread widening and size reduction.
 
-The aggregated top of book is not guaranteed to be executable on a single venue.
+The cross-venue best spread is not used directly in quote construction, but serves as a diagnostic signal of cross-venue dislocation and inconsistency.
+
+The aggregated top of book is not guaranteed to be executable on a single venue. The resulting spread of this synthetic book is referred to as the cross-venue best spread.
+
+### Cross-venue best spread
+
+The cross-venue best spread is defined as:
+
+cross_venue_best_spread = min(best ask across venues) - max(best bid across venues)
+
+This is a synthetic spread constructed from the best prices observed across all filtered venues.
+
+Properties:
+- can be negative when venues are dislocated
+- reflects cross-venue disagreement rather than executable liquidity
+- uses only filtered venues
+
+This metric is not directly tradable, as the best bid and best ask may originate from different venues.
 
 ### Cross-venue disagreement
 
-Disagreement is measured in basis points.
+Disagreement is defined as:
+
+(max(mid across venues) - min(mid across venues)) / fair_value
+
+expressed in basis points. It measures dispersion of mid prices across filtered venues.
+
+When only one venue is available, disagreement is defined as zero and carries no information.
 
 It is used for:
-- filtering in extreme cases
 - spread widening
 - quote size reduction
+- quote suppression when exceeding configured thresholds
 
-Cross-venue disagreement is not treated as book corruption. Instead, it is treated as a signal of market uncertainty or data inconsistency and is used to reduce quoting aggressiveness. 
+Cross-venue disagreement is not treated as book corruption. Instead, it is treated as a signal of market uncertainty or data inconsistency and is used to reduce quoting aggressiveness.
 
 ---
 
@@ -202,7 +225,7 @@ Inventory is not applied as a strong global size reduction to avoid double-count
 Quoting is disabled when:
 - no fair value is available
 - only a low-confidence venue is available
-- disagreement exceeds threshold
+- disagreement exceeds configured suppression threshold
 - market health is unhealthy
 
 ---
@@ -223,12 +246,23 @@ It is not optimized for:
 
 ## Possible Extensions
 
-- dynamic venue trust scoring
-- latency-aware weighting
-- external reference prices (e.g. perpetual futures)
-- quote quality evaluation (markouts)
-- lightweight fair value smoothing
+These extensions are not required for correct system operation, but can improve robustness, efficiency, or performance.
 
+- dynamic venue trust scoring  
+  adapt venue weights over time based on observed reliability, stability, and execution quality  
+
+- latency-aware weighting  
+  incorporate feed latency or update frequency into venue weighting to reduce reliance on stale or delayed data  
+
+- external reference prices (e.g. perpetual futures)  
+  incorporate additional markets as anchors to improve price stability and reduce cross-venue bias  
+
+- quote quality evaluation (markouts)  
+  measure post-trade performance to assess quote quality and calibrate spread and size parameters  
+
+- lightweight fair value smoothing  
+  apply temporal smoothing to fair value to reduce noise from rapid top-of-book fluctuations
+  
 ---
 
 ## Summary
