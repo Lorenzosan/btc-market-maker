@@ -1,21 +1,38 @@
-# python
+# Python
 __pycache__/
 *.pyc
 *.pyo
-*.egg-info
+*.pyd
 
-# virtual env
-btc-venv/
+# Virtual env
 venv/
+.env/
 
-# logs
+# Packaging
+*.egg-info/
+dist/
+build/
+
+# C++ build
+build/
+*.so
+*.dylib
+*.dll
+*.a
+*.o
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# Logs
+logs/
 *.log
 
-# mac
-.DS_Store
-
-# editor
-*.swp
-
-# backup files
+# Emacs
 *~
+
+# macOS
+.DS_Store

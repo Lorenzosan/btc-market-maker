@@ -179,7 +179,7 @@ async def run_output_loop(
     base_size=QUOTE_BASE_SIZE,
     verbosity=OUTPUT_VERBOSITY,
 ):
-    manager = OrderBookManager()
+    manager = OrderBookManager(backend="cpp")
     fair_value_engine = FairValueEngine()
     quote_engine = QuoteEngine(
         inventory=inventory,

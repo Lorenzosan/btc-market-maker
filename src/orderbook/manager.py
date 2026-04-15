@@ -3,46 +3,22 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from src.config import COINBASE_QUARANTINE_ON_CROSSED_BOOK
-from src.orderbook.book import OrderBook
+from src.orderbook.factory import create_order_book
 from src.types import MarketDataEvent
-
 
 @dataclass
 class BookState:
-    # Local book for a single venue.
-    book: OrderBook = field(default_factory=OrderBook)
-
-    # Whether we have already received a snapshot for this venue.
+    book: object
     initialized: bool = False
-
-    # Whether the current local book looks internally valid.
     valid: bool = False
-
-    # Last known sequence information when available.
     last_sequence: int | None = None
-
-    # Monotonic timestamp of the last successfully applied event.
     last_update_monotonic: float | None = None
-
-    # Wall-clock timestamp of the last received event.
     last_received_ts: str | None = None
-
-    # Last exchange timestamp that was accepted for this venue.
     last_exchange_ts: str | float | int | None = None
-
-    # Whether the venue is currently considered stale.
     is_stale: bool = True
-
-    # Whether the manager is refusing incremental updates until a new snapshot.
     needs_resync: bool = False
-
-    # Monotonic timestamp of the most recent accepted snapshot.
     last_snapshot_monotonic: float | None = None
-
-    # Monotonic timestamp of the most recent recovery snapshot after quarantine.
     last_resync_monotonic: float | None = None
-
-    # Human-readable state for logging and debugging.
     status: str = "waiting_for_snapshot"
 
     def age_ms(self, now_monotonic: float) -> float | None:
@@ -55,18 +31,19 @@ class BookState:
             return None
         return now_monotonic - self.last_resync_monotonic
 
-
+    
 @dataclass
 class OrderBookManager:
-    # One independent local state per source venue.
     states: dict[str, BookState] = field(default_factory=dict)
+    backend: str = "python"
 
     def get_state(self, source: str) -> BookState:
-        # Lazily create state the first time we see a venue.
         if source not in self.states:
-            self.states[source] = BookState()
+            self.states[source] = BookState(
+                book=create_order_book(self.backend)
+            )
         return self.states[source]
-
+    
     def _mark_update_applied(self, state: BookState, event: MarketDataEvent) -> None:
         # Record freshness only after a snapshot or update has been applied.
         state.last_update_monotonic = time.monotonic()
