@@ -1,8 +1,9 @@
 #pragma once
 
-#include <unordered_map>
-#include <vector>
+#include <functional>
+#include <map>
 #include <utility>
+#include <vector>
 
 namespace btc_mm {
 
@@ -26,13 +27,16 @@ public:
 
     PriceLevel best_bid() const;
     PriceLevel best_ask() const;
+
     bool has_best_bid() const;
     bool has_best_ask() const;
     bool is_crossed() const;
 
+    std::size_t bid_count() const;
+
 private:
-    std::unordered_map<double, double> m_bids;
-    std::unordered_map<double, double> m_asks;
+    std::map<Price, Size, std::greater<Price>> m_bids;
+    std::map<Price, Size> m_asks;
 };
 
 } // namespace btc_mm
